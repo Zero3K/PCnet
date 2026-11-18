@@ -185,6 +185,12 @@ DeleteAdapterMemory(
     IN PLANCE_ADAPTER Adapter
     );
 
+STATIC
+BOOLEAN
+LancePciHardwareDetails(
+    IN PLANCE_ADAPTER Adapter
+    );
+
 VOID
 RelinquishReceivePacket(
     IN PLANCE_ADAPTER Adapter,
@@ -406,11 +412,15 @@ Return Value:
 
     UINT MaxMulticastList = 32;
     PVOID NetAddress;
-    UINT Length;
+    UINT Length = 0;
 
     USHORT RegUshort;
     UCHAR RegUchar;
     UINT LanceSlot = 1;
+    ULONG PciId;
+    ULONG PciIoBase;
+    USHORT PciCommand;
+    UCHAR PciInterrupt;
 
     BOOLEAN ConfigError = FALSE;
     NDIS_STATUS ConfigErrorCode;
@@ -469,10 +479,86 @@ Return Value:
     Adapter->InterruptRequestLevel = LANCE_DE201_INTERRUPT_VECTOR;
     Adapter->BeingRemoved = FALSE;
 
+    //
+    // The PCI IDs in the INF bind only PCnet devices.  Read the ID and BAR
+    // directly so the legacy ISA/EISA configuration path remains unchanged.
+    //
+    PciId = 0;
+    if (NdisReadPciSlotInformation(
+            MiniportAdapterHandle,
+            0,
+            0,
+            &PciId,
+            sizeof(PciId)) == sizeof(PciId) &&
+        (PciId & 0xffff) == 0x1022 &&
+        (((PciId >> 16) == 0x2000) ||
+         ((PciId >> 16) == 0x2001) ||
+         ((PciId >> 16) == 0x2621) ||
+         ((PciId >> 16) == 0x2623) ||
+         ((PciId >> 16) == 0x2624) ||
+         ((PciId >> 16) == 0x2625) ||
+         ((PciId >> 16) == 0x2626) ||
+         ((PciId >> 16) == 0x2627)))
+    {
+        PciIoBase = 0;
+        PciInterrupt = 0;
+        PciCommand = 0;
+
+        if (NdisReadPciSlotInformation(
+                MiniportAdapterHandle,
+                0,
+                0x10,
+                &PciIoBase,
+                sizeof(PciIoBase)) != sizeof(PciIoBase) ||
+            !(PciIoBase & 1) ||
+            (PciIoBase & ~3UL) == 0 ||
+            NdisReadPciSlotInformation(
+                MiniportAdapterHandle,
+                0,
+                0x3c,
+                &PciInterrupt,
+                sizeof(PciInterrupt)) != sizeof(PciInterrupt) ||
+            PciInterrupt == 0xff ||
+            NdisReadPciSlotInformation(
+                MiniportAdapterHandle,
+                0,
+                0x04,
+                &PciCommand,
+                sizeof(PciCommand)) != sizeof(PciCommand))
+        {
+            LANCE_FREE_PHYS(Adapter, sizeof(LANCE_ADAPTER));
+            return(NDIS_STATUS_ADAPTER_NOT_FOUND);
+        }
+
+        PciCommand |= 0x0005;
+        if (NdisWritePciSlotInformation(
+                MiniportAdapterHandle,
+                0,
+                0x04,
+                &PciCommand,
+                sizeof(PciCommand)) != sizeof(PciCommand))
+        {
+            LANCE_FREE_PHYS(Adapter, sizeof(LANCE_ADAPTER));
+            return(NDIS_STATUS_ADAPTER_NOT_FOUND);
+        }
+
+        Adapter->LanceCard = LANCE_PCNET;
+        Adapter->IsPci = TRUE;
+        Adapter->IoBaseAddr = PciIoBase & ~3UL;
+        Adapter->InterruptNumber = (CCHAR)PciInterrupt;
+        Adapter->InterruptRequestLevel = (CCHAR)PciInterrupt;
+        Adapter->AmountOfHardwareMemory = 0x10000;
+    }
+
     NdisOpenConfiguration(&Status, &ConfigHandle, ConfigurationHandle);
     if (Status != NDIS_STATUS_SUCCESS)
+    {
+        LANCE_FREE_PHYS(Adapter, sizeof(LANCE_ADAPTER));
         return(Status);
+    }
 
+    if (!Adapter->IsPci)
+    {
 #if NDIS2
     //
     // Read Card Type
@@ -590,6 +676,7 @@ Return Value:
         }
     }
 #endif
+    }
 
     //
     // Read MaxMulticastList
@@ -927,7 +1014,19 @@ RegisterAdapter:
 
     }
 
-    NdisMSetAttributes(
+    if (Adapter->IsPci)
+    {
+        NdisMSetAttributesEx(
+            MiniportAdapterHandle,
+            (NDIS_HANDLE)Adapter,
+            0,
+            NDIS_ATTRIBUTE_BUS_MASTER,
+            NdisInterfacePci
+            );
+    }
+    else
+    {
+        NdisMSetAttributes(
             MiniportAdapterHandle,
             (NDIS_HANDLE)Adapter,
             FALSE,
@@ -935,12 +1034,46 @@ RegisterAdapter:
                 NdisInterfaceEisa :
                 NdisInterfaceIsa
             );
+    }
+
+    if (Adapter->IsPci)
+    {
+        Status = NdisMAllocateMapRegisters(
+            MiniportAdapterHandle,
+            0,
+            NDIS_DMA_24BITS,
+            1,
+            Adapter->AmountOfHardwareMemory
+            );
+
+        if (Status != NDIS_STATUS_SUCCESS)
+        {
+            LANCE_FREE_PHYS(Adapter, sizeof(LANCE_ADAPTER));
+            return(Status);
+        }
+
+        Adapter->MapRegistersAllocated = TRUE;
+    }
 
     //
     // Register the IoPortRanges
     //
 
-    if (Adapter->LanceCard & (LANCE_DE100 | LANCE_DE201)) {
+    if (Adapter->IsPci) {
+
+        Status = NdisMRegisterIoPortRange(
+                     (PVOID *)(&(Adapter->Nicsr)),
+                     MiniportAdapterHandle,
+                     Adapter->IoBaseAddr,
+                     0x20
+                     );
+
+        Adapter->RAP = Adapter->Nicsr + 0x12;
+        Adapter->RDP = Adapter->Nicsr + 0x10;
+        Adapter->BDP = Adapter->Nicsr + 0x16;
+        Adapter->NetworkHardwareAddress = Adapter->Nicsr;
+
+    } else if (Adapter->LanceCard & (LANCE_DE100 | LANCE_DE201)) {
 
         Status = NdisMRegisterIoPortRange(
                      (PVOID *)(&(Adapter->Nicsr)),
@@ -1003,11 +1136,18 @@ RegisterAdapter:
 
     if (Status != NDIS_STATUS_SUCCESS) {
 
+        if (Adapter->MapRegistersAllocated) {
+            NdisMFreeMapRegisters(MiniportAdapterHandle);
+            Adapter->MapRegistersAllocated = FALSE;
+        }
+
         LANCE_FREE_PHYS(Adapter, sizeof(LANCE_ADAPTER));
 
         return Status;
 
     }
+
+    Adapter->IoPortsRegistered = TRUE;
 
     //
     // Now we get the rest of the information necessary for the DE422.
@@ -1257,7 +1397,15 @@ Fail1:
     // Deregister the IoPortRanges
     //
 
-    if (Adapter->LanceCard & (LANCE_DE100 | LANCE_DE201)) {
+    if (Adapter->IoPortsRegistered && Adapter->IsPci) {
+        NdisMDeregisterIoPortRange(
+            MiniportAdapterHandle,
+            Adapter->IoBaseAddr,
+            0x20,
+            (PVOID)(Adapter->Nicsr)
+            );
+    } else if (Adapter->IoPortsRegistered &&
+               (Adapter->LanceCard & (LANCE_DE100 | LANCE_DE201))) {
 
         NdisMDeregisterIoPortRange(
             MiniportAdapterHandle,
@@ -1266,7 +1414,8 @@ Fail1:
             (PVOID)(Adapter->Nicsr)
             );
 
-    } else if (Adapter->LanceCard == LANCE_DE422) {
+    } else if (Adapter->IoPortsRegistered &&
+               Adapter->LanceCard == LANCE_DE422) {
 
         NdisMDeregisterIoPortRange(
             MiniportAdapterHandle,
@@ -1275,6 +1424,10 @@ Fail1:
             (PVOID)(Adapter->Nicsr)
             );
 
+    }
+
+    if (Adapter->MapRegistersAllocated) {
+        NdisMFreeMapRegisters(MiniportAdapterHandle);
     }
 
     LANCE_FREE_PHYS(Adapter, sizeof(LANCE_ADAPTER));
@@ -1325,6 +1478,7 @@ Return Value:
     //
     // Restore saved values
     //
+    if (!Adapter->IsPci)
     {
         PUCHAR pTemp = Adapter->MmMappedBaseAddr;
 
@@ -1340,18 +1494,44 @@ Return Value:
 
 #endif
 
-    NdisMUnmapIoSpace(
-       Adapter->MiniportAdapterHandle,
-       Adapter->MmMappedBaseAddr,
-       Adapter->AmountOfHardwareMemory
-       );
+    if (Adapter->IsPci)
+    {
+        if (Adapter->SharedMemoryAllocated)
+        {
+            NdisMFreeSharedMemory(
+                Adapter->MiniportAdapterHandle,
+                Adapter->AmountOfHardwareMemory,
+                FALSE,
+                Adapter->MmMappedBaseAddr,
+                Adapter->SharedMemoryPhysicalAddress
+                );
+        }
+    }
+    else
+    {
+        NdisMUnmapIoSpace(
+           Adapter->MiniportAdapterHandle,
+           Adapter->MmMappedBaseAddr,
+           Adapter->AmountOfHardwareMemory
+           );
+    }
 
     //
     // bug3327
     //
-    NdisRawWritePortUshort((ULONG)(Adapter->Nicsr), 0x04);
+    if (!Adapter->IsPci)
+    {
+        NdisRawWritePortUshort((ULONG)(Adapter->Nicsr), 0x04);
+    }
 
-    if (Adapter->LanceCard & (LANCE_DE100 | LANCE_DE201)) {
+    if (Adapter->IsPci) {
+        NdisMDeregisterIoPortRange(
+            Adapter->MiniportAdapterHandle,
+            Adapter->IoBaseAddr,
+            0x20,
+            (PVOID)(Adapter->Nicsr)
+            );
+    } else if (Adapter->LanceCard & (LANCE_DE100 | LANCE_DE201)) {
 
         NdisMDeregisterIoPortRange(
             Adapter->MiniportAdapterHandle,
@@ -1373,9 +1553,48 @@ Return Value:
 
     DeleteAdapterMemory(Adapter);
 
+    if (Adapter->MapRegistersAllocated) {
+        NdisMFreeMapRegisters(Adapter->MiniportAdapterHandle);
+    }
+
     NdisFreeMemory(Adapter, sizeof(LANCE_ADAPTER), 0);
 
     return;
+}
+
+#pragma NDIS_PAGEABLE_FUNCTION(LancePciHardwareDetails)
+
+STATIC
+BOOLEAN
+LancePciHardwareDetails(
+    IN PLANCE_ADAPTER Adapter
+    )
+{
+    UINT i;
+    BOOLEAN AllZero = TRUE;
+    BOOLEAN AllOnes = TRUE;
+
+    for (i = 0; i < LANCE_LENGTH_OF_ADDRESS; i++)
+    {
+        NdisRawReadPortUchar(
+            Adapter->NetworkHardwareAddress + i,
+            (PUCHAR)&Adapter->NetworkAddress[i]
+            );
+
+        if (Adapter->NetworkAddress[i] != 0)
+        {
+            AllZero = FALSE;
+        }
+
+        if ((UCHAR)Adapter->NetworkAddress[i] != 0xff)
+        {
+            AllOnes = FALSE;
+        }
+    }
+
+    return((BOOLEAN)(!AllZero &&
+                     !AllOnes &&
+                     !(Adapter->NetworkAddress[0] & 0x01)));
 }
 
 #pragma NDIS_PAGEABLE_FUNCTION(LanceRegisterAdapter)
@@ -1408,6 +1627,7 @@ Return Value:
     // Result of Ndis Calls.
     //
     NDIS_STATUS Status;
+    USHORT ResetValue;
 
 
     //
@@ -1499,11 +1719,13 @@ Return Value:
 
     if (((Adapter->LanceCard == LANCE_DECTC) &&
         (LanceDecTcHardwareDetails(Adapter) == NDIS_STATUS_SUCCESS)) ||
-        LanceHardwareDetails(Adapter))
+        (Adapter->IsPci ? LancePciHardwareDetails(Adapter) :
+                          LanceHardwareDetails(Adapter)))
 
 #else
 
-    if (LanceHardwareDetails(Adapter))
+    if (Adapter->IsPci ? LancePciHardwareDetails(Adapter) :
+                         LanceHardwareDetails(Adapter))
 
 #endif
         {
@@ -1531,15 +1753,56 @@ Return Value:
 
         }
 
-        NdisSetPhysicalAddressHigh(PhysicalAddress, 0);
-        NdisSetPhysicalAddressLow(PhysicalAddress, (ULONG)(Adapter->HardwareBaseAddr));
+        if (Adapter->IsPci)
+        {
+            Status = NdisMAllocateSharedMemory(
+                         Adapter->MiniportAdapterHandle,
+                         Adapter->AmountOfHardwareMemory,
+                         FALSE,
+                         &(Adapter->MmMappedBaseAddr),
+                         &(Adapter->SharedMemoryPhysicalAddress)
+                         );
 
-        Status = NdisMMapIoSpace(
-                     &(Adapter->MmMappedBaseAddr),
-                     Adapter->MiniportAdapterHandle,
-                     PhysicalAddress,
-                     Adapter->AmountOfHardwareMemory
-                     );
+            if (Status == NDIS_STATUS_SUCCESS)
+            {
+                ULONG PhysicalBase =
+                    NdisGetPhysicalAddressLow(
+                        Adapter->SharedMemoryPhysicalAddress);
+
+                if (NdisGetPhysicalAddressHigh(
+                        Adapter->SharedMemoryPhysicalAddress) != 0 ||
+                    PhysicalBase >
+                        (0x01000000 - Adapter->AmountOfHardwareMemory))
+                {
+                    NdisMFreeSharedMemory(
+                        Adapter->MiniportAdapterHandle,
+                        Adapter->AmountOfHardwareMemory,
+                        FALSE,
+                        Adapter->MmMappedBaseAddr,
+                        Adapter->SharedMemoryPhysicalAddress
+                        );
+                    Status = NDIS_STATUS_RESOURCES;
+                }
+                else
+                {
+                    Adapter->SharedMemoryAllocated = TRUE;
+                }
+            }
+        }
+        else
+        {
+            NdisSetPhysicalAddressHigh(PhysicalAddress, 0);
+            NdisSetPhysicalAddressLow(
+                PhysicalAddress,
+                (ULONG)(Adapter->HardwareBaseAddr));
+
+            Status = NdisMMapIoSpace(
+                         &(Adapter->MmMappedBaseAddr),
+                         Adapter->MiniportAdapterHandle,
+                         PhysicalAddress,
+                         Adapter->AmountOfHardwareMemory
+                         );
+        }
 
         if (Status != NDIS_STATUS_SUCCESS) {
 
@@ -1558,6 +1821,7 @@ Return Value:
         //
         // Save card setup information that is in card on-board memory
         //
+        if (!Adapter->IsPci)
         {
             PUCHAR pTemp = (PUCHAR) (Adapter->MmMappedBaseAddr);
 
@@ -1589,7 +1853,27 @@ Return Value:
                 0
                 );
 
-            return( NDIS_STATUS_ADAPTER_NOT_FOUND );
+            if (Adapter->IsPci)
+            {
+                NdisMFreeSharedMemory(
+                    Adapter->MiniportAdapterHandle,
+                    Adapter->AmountOfHardwareMemory,
+                    FALSE,
+                    Adapter->MmMappedBaseAddr,
+                    Adapter->SharedMemoryPhysicalAddress
+                    );
+                Adapter->SharedMemoryAllocated = FALSE;
+            }
+            else
+            {
+                NdisMUnmapIoSpace(
+                    Adapter->MiniportAdapterHandle,
+                    Adapter->MmMappedBaseAddr,
+                    Adapter->AmountOfHardwareMemory
+                    );
+            }
+
+            return(NDIS_STATUS_ADAPTER_NOT_FOUND);
 
         }
 
@@ -1621,6 +1905,14 @@ Return Value:
         // directly since we don't have an Interrupt object yet.
         //
 
+        if (Adapter->IsPci)
+        {
+            NdisRawReadPortUshort(Adapter->Nicsr + 0x14, &ResetValue);
+            NdisStallExecution(1000);
+            NdisRawWritePortUshort(Adapter->RAP, 20);
+            NdisRawWritePortUshort(Adapter->BDP, 0);
+        }
+
         LanceSyncStopChip(Adapter);
 
 
@@ -1628,15 +1920,30 @@ Return Value:
         // Initialize the interrupt.
         //
 
-        Status = NdisMRegisterInterrupt(
-                     &Adapter->Interrupt,
-                     Adapter->MiniportAdapterHandle,
-                     Adapter->InterruptNumber,
-                     Adapter->InterruptRequestLevel,
-                     FALSE,
-                     FALSE,
-                     NdisInterruptLatched
-                     );
+        if (Adapter->IsPci)
+        {
+            Status = NdisMRegisterInterrupt(
+                         &Adapter->Interrupt,
+                         Adapter->MiniportAdapterHandle,
+                         Adapter->InterruptNumber,
+                         Adapter->InterruptRequestLevel,
+                         TRUE,
+                         TRUE,
+                         NdisInterruptLevelSensitive
+                         );
+        }
+        else
+        {
+            Status = NdisMRegisterInterrupt(
+                         &Adapter->Interrupt,
+                         Adapter->MiniportAdapterHandle,
+                         Adapter->InterruptNumber,
+                         Adapter->InterruptRequestLevel,
+                         FALSE,
+                         FALSE,
+                         NdisInterruptLatched
+                         );
+        }
 
         if (Status != NDIS_STATUS_SUCCESS){
 
@@ -1646,11 +1953,25 @@ Return Value:
                 0
                 );
 
-            NdisMUnmapIoSpace(
-                Adapter->MiniportAdapterHandle,
-                Adapter->MmMappedBaseAddr,
-                Adapter->AmountOfHardwareMemory
-                );
+            if (Adapter->IsPci)
+            {
+                NdisMFreeSharedMemory(
+                    Adapter->MiniportAdapterHandle,
+                    Adapter->AmountOfHardwareMemory,
+                    FALSE,
+                    Adapter->MmMappedBaseAddr,
+                    Adapter->SharedMemoryPhysicalAddress
+                    );
+                Adapter->SharedMemoryAllocated = FALSE;
+            }
+            else
+            {
+                NdisMUnmapIoSpace(
+                    Adapter->MiniportAdapterHandle,
+                    Adapter->MmMappedBaseAddr,
+                    Adapter->AmountOfHardwareMemory
+                    );
+            }
 
             DeleteAdapterMemory(Adapter);
 
@@ -1666,11 +1987,25 @@ Return Value:
                 0
                 );
 
-            NdisMUnmapIoSpace(
-                Adapter->MiniportAdapterHandle,
-                Adapter->MmMappedBaseAddr,
-                Adapter->AmountOfHardwareMemory
-                );
+            if (Adapter->IsPci)
+            {
+                NdisMFreeSharedMemory(
+                    Adapter->MiniportAdapterHandle,
+                    Adapter->AmountOfHardwareMemory,
+                    FALSE,
+                    Adapter->MmMappedBaseAddr,
+                    Adapter->SharedMemoryPhysicalAddress
+                    );
+                Adapter->SharedMemoryAllocated = FALSE;
+            }
+            else
+            {
+                NdisMUnmapIoSpace(
+                    Adapter->MiniportAdapterHandle,
+                    Adapter->MmMappedBaseAddr,
+                    Adapter->AmountOfHardwareMemory
+                    );
+            }
 
             DeleteAdapterMemory(Adapter);
 
@@ -1737,6 +2072,15 @@ Return Value:
         LOG(UNPEND);
 
         LANCE_WRITE_NICSR(Adapter, LANCE_NICSR_INT_ON);
+    }
+
+    if (Adapter->IsPci)
+    {
+        LANCE_WRITE_RAP(Adapter, 4);
+        LANCE_WRITE_RDP(Adapter, 0x4000);
+
+        LANCE_WRITE_RAP(Adapter, 18);
+        NdisRawWritePortUshort(Adapter->BDP, 0x0060);
     }
 
     SetInitBlockAndInit(Adapter);
@@ -1952,6 +2296,13 @@ Return Value:
     //
     // Pend any interrupts
     //
+    if (Adapter->IsPci)
+    {
+        LANCE_WRITE_RAP(Adapter, LANCE_SELECT_CSR0);
+        LANCE_WRITE_RDP(Adapter, 0);
+        return;
+    }
+
     ASSERT(Adapter->LanceCard & (LANCE_DE201 | LANCE_DE100 | LANCE_DE422));
 
     LOG(PEND);
@@ -1986,6 +2337,13 @@ Return Value:
 --*/
 {
     PLANCE_ADAPTER Adapter = (PLANCE_ADAPTER)MiniportAdapterContext;
+
+    if (Adapter->IsPci)
+    {
+        LANCE_WRITE_RAP(Adapter, LANCE_SELECT_CSR0);
+        LANCE_WRITE_RDP(Adapter, LANCE_CSR0_INTERRUPT_ENABLE);
+        return;
+    }
 
     ASSERT(Adapter->LanceCard & (LANCE_DE201 | LANCE_DE100 | LANCE_DE422));
 

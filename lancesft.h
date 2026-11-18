@@ -138,6 +138,7 @@ extern NDIS_PHYSICAL_ADDRESS HighestAcceptableMax;
 #define LANCE_DECST      0x08    // Card in a decstation
 #define LANCE_DE422      0x10    // DE422 card
 #define LANCE_DECTC      0x20    // TurboChannel PMAD-AA option
+#define LANCE_PCNET      0x40    // PCI PCnet-compatible adapter
 
 #define LANCE_DE100_NAME LANCE_DEFAULT_NAME
 #define LANCE_DE201_NAME LANCE_DEFAULT_NAME
@@ -384,9 +385,23 @@ typedef struct _LANCE_ADAPTER {
     ULONG RDP;
 
     //
+    // Pointer to the BDP register on PCI PCnet adapters.
+    //
+    ULONG BDP;
+
+    //
     // Pointer to the NICSR register.
     //
     ULONG Nicsr;
+
+    //
+    // PCI PCnet shared-memory pool and bus address.
+    //
+    BOOLEAN IsPci;
+    BOOLEAN SharedMemoryAllocated;
+    BOOLEAN MapRegistersAllocated;
+    BOOLEAN IoPortsRegistered;
+    NDIS_PHYSICAL_ADDRESS SharedMemoryPhysicalAddress;
 
     //
     // Slot Number the De422 is in.
@@ -763,7 +778,11 @@ typedef enum _LANCE_PROC_ID {
 // We now convert the virtual address to the actual physical address.
 //
 #define LANCE_GET_HARDWARE_PHYSICAL_ADDRESS(A,P) \
-      (ULONG)((PCHAR)P - (PCHAR)(A)->MmMappedBaseAddr + (A)->HardwareBaseOffset)
+      ((A)->IsPci ? \
+       (ULONG)(NdisGetPhysicalAddressLow((A)->SharedMemoryPhysicalAddress) + \
+               (ULONG_PTR)(P) - (ULONG_PTR)(A)->MmMappedBaseAddr) : \
+       (ULONG)((PCHAR)(P) - (PCHAR)(A)->MmMappedBaseAddr + \
+               (A)->HardwareBaseOffset))
 
 //
 // This macro is used to "deallocate the memory from the hardware.
