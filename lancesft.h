@@ -51,7 +51,7 @@ Revision History:
 #ifndef _LANCESFT_
 #define _LANCESFT_
 
-#define LANCE_NDIS_MAJOR_VERSION 3
+#define LANCE_NDIS_MAJOR_VERSION 5
 #define LANCE_NDIS_MINOR_VERSION 0
 
 #if DBG
@@ -160,23 +160,23 @@ extern NDIS_PHYSICAL_ADDRESS HighestAcceptableMax;
 //
 typedef union _LANCE_RECEIVE_CONTEXT {
 
-    UINT WholeThing;
+    ULONG_PTR WholeThing;
     struct _INFO {
         //
         // Used to mark that this is context rather than a pointer
         // to a packet.
         //
-        UINT IsContext:1;
+        ULONG_PTR IsContext:1;
 
         //
         // The first receive ring descriptor used to hold the packet.
         //
-        UINT FirstBuffer:7;
+        ULONG_PTR FirstBuffer:7;
 
         //
         // The last receive ring descriptor used to hold the packet.
         //
-        UINT LastBuffer:7;
+        ULONG_PTR LastBuffer:7;
     } INFO;
 
 } LANCE_RECEIVE_CONTEXT,*PLANCE_RECEIVE_CONTEXT;
