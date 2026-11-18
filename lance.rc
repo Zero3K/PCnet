@@ -31,9 +31,8 @@
 				VFT2_DRV_SOUND
 				VFT2_DRV_COMM
 */
-#define VER_FILEDESCRIPTION_STR     "DEC Etherworks network driver"
+#define VER_FILEDESCRIPTION_STR     "AMD PCnet PCI Ethernet driver"
 #define VER_INTERNALNAME_STR        "LANCE.SYS"
 #define VER_ORIGINALFILENAME_STR    "LANCE.SYS"
 
 #include "common.ver"
-

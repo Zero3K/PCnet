@@ -27,25 +27,6 @@ Notes:
 
     optional-notes
 
-Revision History:
-
-    31-Jul-1992  R.D. Lanser:
-
-       Changed DECST card type to DECTC for the DEC TurboChannel option
-       PMAD-AA (Lance ethernet).  This option will be available for all
-       TurboChannel systems regardless of CPU type or system.
-
-       Added  InterruptRequestLevel to the _LANCE_ADAPTER structure because
-       'lance.c' was passing the InterruptVector as the IRQL to the interrupt
-       connect routine which is not correct.  This works on JAZZ because the
-       JAZZ HalGetInterruptVector is hardcoded to return a fixed IRQL for
-       EISA devices.
-
-       Removed PhysicalBuffersContained and UsedLanceBuffer field from
-       _ADAPTER structure.  SeanSe says that the code related to this
-       field was used for adevice that is no longer supported.  I removed
-       the dependent code(or at least what was obvious) from 'send.c'.
-
 --*/
 
 #ifndef _LANCESFT_
@@ -125,28 +106,6 @@ extern NDIS_PHYSICAL_ADDRESS HighestAcceptableMax;
 #define LANCE_MOVE_MEMORY(Destination,Source,Length) NdisMoveMemory(Destination,Source,Length)
 #define LANCE_ZERO_MEMORY(Destination,Length) NdisZeroMemory(Destination,Length)
 
-
-
-//
-// Definitions for all the different card types.
-//
-
-
-#define LANCE_DE100      0x01    // DE100 card
-#define LANCE_DE201      0x02    // DE201 card
-#define LANCE_DEPCA      0x04    // Card in a Dec PC x86 machine
-#define LANCE_DECST      0x08    // Card in a decstation
-#define LANCE_DE422      0x10    // DE422 card
-#define LANCE_DECTC      0x20    // TurboChannel PMAD-AA option
-#define LANCE_PCNET      0x40    // PCI PCnet-compatible adapter
-
-#define LANCE_DE100_NAME LANCE_DEFAULT_NAME
-#define LANCE_DE201_NAME LANCE_DEFAULT_NAME
-#define LANCE_DEPCA_NAME LANCE_DEFAULT_NAME
-#define LANCE_DECST_NAME LANCE_DEFAULT_NAME
-#define LANCE_DE422_NAME LANCE_DEFAULT_NAME
-#define LANCE_DECTC_NAME LANCE_DEFAULT_NAME
-#define LANCE_DEFAULT_NAME "\\Device\\Lance01"
 
 
 //
@@ -323,11 +282,6 @@ typedef struct _LANCE_BUFFER_DESCRIPTOR {
 typedef struct _LANCE_ADAPTER {
 
     //
-    // The card type of this adapter.
-    //
-    UCHAR LanceCard;
-
-    //
     // Holds the interrupt object for this adapter.
     //
     NDIS_MINIPORT_INTERRUPT Interrupt;
@@ -344,23 +298,12 @@ typedef struct _LANCE_ADAPTER {
     PVOID MmMappedBaseAddr;
 
     //
-    // Contains address of the hardware memory.
-    //
-    PVOID HardwareBaseAddr;
-
-    //
-    // Offset for Init block from the Lance chip's point of view.
-    //
-    ULONG HardwareBaseOffset;
-
-    //
     // Amount of memory
     //
     ULONG AmountOfHardwareMemory;
 
     //
-    // For lance implementation that uses dual ported memory this
-    // field is used to point to the first available memory.
+    // Points to the first available address in shared adapter memory.
     //
     PVOID CurrentMemoryFirstFree;
 
@@ -390,33 +333,17 @@ typedef struct _LANCE_ADAPTER {
     ULONG BDP;
 
     //
-    // Pointer to the NICSR register.
+    // Mapped base address of the PCI register range.
     //
-    ULONG Nicsr;
+    ULONG IoPortBase;
 
     //
     // PCI PCnet shared-memory pool and bus address.
     //
-    BOOLEAN IsPci;
     BOOLEAN SharedMemoryAllocated;
     BOOLEAN MapRegistersAllocated;
     BOOLEAN IoPortsRegistered;
     NDIS_PHYSICAL_ADDRESS SharedMemoryPhysicalAddress;
-
-    //
-    // Slot Number the De422 is in.
-    //
-    UINT SlotNumber;
-
-    //
-    // Default information to add to the NICSR register value
-    //
-    USHORT NicsrDefaultValue;
-
-    //
-    // Have the interrupts from the card been turned off.
-    //
-    BOOLEAN InterruptsStopped;
 
     //
     // Address in memory of the network address
@@ -671,9 +598,6 @@ typedef struct _LANCE_ADAPTER {
     //
     BOOLEAN HardwareFailure;
 
-    USHORT SavedMemBase;
-    UINT Reserved1;
-    UINT Reserved2;
     //
     // Lookahead buffer for loopback packets
     //
@@ -778,11 +702,8 @@ typedef enum _LANCE_PROC_ID {
 // We now convert the virtual address to the actual physical address.
 //
 #define LANCE_GET_HARDWARE_PHYSICAL_ADDRESS(A,P) \
-      ((A)->IsPci ? \
-       (ULONG)(NdisGetPhysicalAddressLow((A)->SharedMemoryPhysicalAddress) + \
-               (ULONG_PTR)(P) - (ULONG_PTR)(A)->MmMappedBaseAddr) : \
-       (ULONG)((PCHAR)(P) - (PCHAR)(A)->MmMappedBaseAddr + \
-               (A)->HardwareBaseOffset))
+      (ULONG)(NdisGetPhysicalAddressLow((A)->SharedMemoryPhysicalAddress) + \
+              (ULONG_PTR)(P) - (ULONG_PTR)(A)->MmMappedBaseAddr)
 
 //
 // This macro is used to "deallocate the memory from the hardware.
@@ -794,38 +715,6 @@ typedef enum _LANCE_PROC_ID {
 }
 
 
-
-
-
-//
-// These are routines for synchronizing with the ISR
-//
-
-
-//
-// This structure is used to synchronize reading and writing to ports
-// with the ISR.
-//
-
-typedef struct _LANCE_SYNCH_CONTEXT {
-
-    //
-    // Pointer to the lance adapter for which interrupts are
-    // being synchronized.
-    //
-    PLANCE_ADAPTER Adapter;
-
-    //
-    // Pointer to a local variable that will receive the value
-    //
-    PUSHORT LocalRead;
-
-    //
-    // Value to write
-    //
-    USHORT LocalWrite;
-
-} LANCE_SYNCH_CONTEXT,*PLANCE_SYNCH_CONTEXT;
 
 
 
@@ -841,28 +730,6 @@ typedef struct _LANCE_SYNCH_CONTEXT {
 #define LANCE_READ_RDP(A,C) { \
     LANCE_ISR_READ_RDP(A,C);\
 }
-
-#define LANCE_WRITE_NICSR(A,C) { \
-    PLANCE_ADAPTER _A = A; \
-    LANCE_SYNCH_CONTEXT _C; \
-    _C.Adapter = _A; \
-    _C.LocalWrite = (C | _A->NicsrDefaultValue); \
-    NdisMSynchronizeWithInterrupt( \
-        &(_A)->Interrupt, \
-        LanceSyncWriteNicsr, \
-        &_C \
-        ); \
-}
-
-BOOLEAN
-LanceSyncWriteNicsr(
-    IN PVOID Context
-    );
-
-BOOLEAN
-LanceSyncGetInterruptsStopped(
-    IN PVOID Context
-    );
 
 BOOLEAN
 LanceSyncStopChip(
@@ -920,12 +787,6 @@ LanceCopyFromPacketToPacket(
     IN PNDIS_PACKET Source,
     IN UINT SourceOffset,
     OUT PUINT BytesCopied
-    );
-
-extern
-BOOLEAN
-LanceHardwareDetails(
-    IN PLANCE_ADAPTER Adapter
     );
 
 extern
