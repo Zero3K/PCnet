@@ -51,7 +51,7 @@ Revision History:
 #ifndef _LANCESFT_
 #define _LANCESFT_
 
-#define LANCE_NDIS_MAJOR_VERSION 3
+#define LANCE_NDIS_MAJOR_VERSION 5
 #define LANCE_NDIS_MINOR_VERSION 0
 
 #if DBG

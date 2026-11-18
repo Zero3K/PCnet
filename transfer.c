@@ -9,7 +9,7 @@ Module Name:
 Abstract:
 
     This file contains the code to implement the MacTransferData
-    API for the ndis 3.0 interface.
+    API for the NDIS miniport interface.
 
 Author:
 

@@ -9,7 +9,7 @@ Module Name:
 Abstract:
 
     This is the main file for the Advanced Micro Devices LANCE (Am 7990)
-    Ethernet controller.  This driver conforms to the NDIS 3.0 interface.
+    Ethernet controller.  This driver conforms to the NDIS 5.0 interface.
 
     The idea for handling loopback and sends simultaneously is largely
     adapted from the EtherLink II NDIS driver by Adam Barr.
@@ -365,7 +365,7 @@ Routine Description:
 
 Arguments:
 
-    See NDIS 3.0 Miniport spec.
+    See NDIS 5.0 Miniport spec.
 
 Return Value:
 
