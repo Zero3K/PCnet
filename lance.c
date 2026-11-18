@@ -1293,8 +1293,13 @@ LanceSyncReadInterruptStatus(
     )
 {
     PLANCE_INTERRUPT_STATUS Status = (PLANCE_INTERRUPT_STATUS)Context;
+    USHORT Csr;
 
-    Status->Csr = Status->Adapter->PendingInterruptStatus;
+    LANCE_ISR_WRITE_RAP(Status->Adapter, LANCE_SELECT_CSR0);
+    LANCE_ISR_READ_RDP(Status->Adapter, &Csr);
+    Status->Csr = (USHORT)((Status->Adapter->PendingInterruptStatus &
+                            ~LANCE_CSR0_TRANSMITTER_ON) |
+                           (Csr & LANCE_CSR0_TRANSMITTER_ON));
     Status->Adapter->PendingInterruptStatus = 0;
 
     return TRUE;
@@ -1435,7 +1440,7 @@ Return Value:
             LanceSyncReadInterruptStatus,
             &InterruptStatus
         );
-        Csr |= InterruptStatus.Csr;
+        Csr = (USHORT)((Csr & ~LANCE_CSR0_TRANSMITTER_ON) | InterruptStatus.Csr);
 
         //
         // Check the interrupt source and other reasons
@@ -1556,7 +1561,7 @@ Return Value:
             {
                 Adapter->MissedPacket++;
             }
-            else if (Csr & LANCE_CSR0_BABBLE)
+            if (Csr & LANCE_CSR0_BABBLE)
             {
                 //
                 // A babble error implies that we've sent a
@@ -1573,12 +1578,11 @@ Return Value:
                     (ULONG)0x1
                 );
             }
-            else
+            if (Csr & LANCE_CSR0_MEMORY_ERROR)
             {
                 //
-                // Could only be a memory error.  This shuts down
-                // the receiver and the transmitter.  We have to
-                // reset to get the device started again.
+                // A memory error shuts down the receiver and the
+                // transmitter.  Reset to get the device started again.
                 //
                 Adapter->MemoryError++;
 
