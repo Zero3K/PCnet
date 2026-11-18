@@ -484,7 +484,7 @@ Return Value:
             return(NDIS_STATUS_ADAPTER_NOT_FOUND);
         }
 
-        Adapter->AmountOfHardwareMemory = 0xc000;
+        Adapter->AmountOfHardwareMemory = 0x10000;
 
         NdisMSetAttributesEx(
             MiniportAdapterHandle,
