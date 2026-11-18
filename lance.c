@@ -695,6 +695,10 @@ Return Value:
     if (Status == NDIS_STATUS_SUCCESS)
     {
         MaxMulticastList = ReturnedValue->ParameterData.IntegerData;
+        if (MaxMulticastList > 0xff)
+        {
+            MaxMulticastList = 0xff;
+        }
     }
 
     //
@@ -1374,7 +1378,7 @@ RegisterAdapter:
     //
 
     Adapter->InterruptsStopped = FALSE;
-    Adapter->MaxMulticastList = MaxMulticastList;
+    Adapter->MaxMulticastList = (UCHAR)MaxMulticastList;
 
     Status = LanceRegisterAdapter( Adapter );
 
@@ -1834,7 +1838,10 @@ Return Value:
 
         if (Adapter->IsPci)
         {
-            Status = NdisMAllocateSharedMemory(
+            ULONG PhysicalBase;
+
+            Adapter->MmMappedBaseAddr = NULL;
+            NdisMAllocateSharedMemory(
                          Adapter->MiniportAdapterHandle,
                          Adapter->AmountOfHardwareMemory,
                          FALSE,
@@ -1842,11 +1849,11 @@ Return Value:
                          &(Adapter->SharedMemoryPhysicalAddress)
                          );
 
-            if (Status == NDIS_STATUS_SUCCESS)
+            if (Adapter->MmMappedBaseAddr != NULL)
             {
-                ULONG PhysicalBase =
-                    NdisGetPhysicalAddressLow(
-                        Adapter->SharedMemoryPhysicalAddress);
+                Status = NDIS_STATUS_SUCCESS;
+                PhysicalBase = NdisGetPhysicalAddressLow(
+                    Adapter->SharedMemoryPhysicalAddress);
 
                 if (NdisGetPhysicalAddressHigh(
                         Adapter->SharedMemoryPhysicalAddress) != 0 ||
@@ -1866,6 +1873,10 @@ Return Value:
                 {
                     Adapter->SharedMemoryAllocated = TRUE;
                 }
+            }
+            else
+            {
+                Status = NDIS_STATUS_RESOURCES;
             }
         }
         else

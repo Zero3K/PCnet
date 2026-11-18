@@ -189,7 +189,7 @@ Revision History:
     ((USHORT)((Adr) & 0xffff))
 
 #define LANCE_GET_HIGH_PART_ADDRESS(Adr) \
-    ((UCHAR)((Adr) & 0xff0000) >> 16)
+    ((UCHAR)(((ULONG)(Adr) >> 16) & 0xff))
 
 typedef struct _LANCE_INITIALIZATION_BLOCK {
 
