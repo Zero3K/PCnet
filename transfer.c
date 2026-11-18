@@ -164,9 +164,9 @@ Return Value:
     *BytesTransferred = 0;
 
     ASSERT(sizeof(UINT) >= 2);
-    ASSERT(sizeof(UINT) == sizeof(NDIS_HANDLE));
+    ASSERT(sizeof(ULONG_PTR) == sizeof(NDIS_HANDLE));
 
-    C.WholeThing = (UINT)MiniportReceiveContext;
+    C.WholeThing = (ULONG_PTR)MiniportReceiveContext;
     FirstBuffer = C.INFO.FirstBuffer;
     LastBuffer = C.INFO.LastBuffer;
 

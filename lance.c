@@ -1328,8 +1328,8 @@ Return Value:
     {
         PUCHAR pTemp = Adapter->MmMappedBaseAddr;
 
-        (UINT)pTemp &= 0xffff0000;
-        (UINT)pTemp |= 0x0000bffe;
+        pTemp = (PUCHAR)(((ULONG_PTR)pTemp & ~(ULONG_PTR)0xffff) |
+                         (ULONG_PTR)0xbffe);
 
         NdisWriteRegisterUshort((PUSHORT)pTemp, Adapter->SavedMemBase);
 
@@ -1561,8 +1561,8 @@ Return Value:
         {
             PUCHAR pTemp = (PUCHAR) (Adapter->MmMappedBaseAddr);
 
-            (UINT)pTemp &= 0xffff0000;
-            (UINT)pTemp |= 0x0000bffe;
+            pTemp = (PUCHAR)(((ULONG_PTR)pTemp & ~(ULONG_PTR)0xffff) |
+                             (ULONG_PTR)0xbffe);
 
             NdisReadRegisterUshort((PUSHORT)pTemp, &(Adapter->SavedMemBase));
             pTemp = (PUCHAR) (Adapter->MmMappedBaseAddr);
