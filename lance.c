@@ -191,6 +191,13 @@ LancePciHardwareDetails(
     IN PLANCE_ADAPTER Adapter
     );
 
+STATIC
+NDIS_STATUS
+LanceQueryPciResources(
+    IN NDIS_HANDLE ConfigurationHandle,
+    IN PLANCE_ADAPTER Adapter
+    );
+
 VOID
 RelinquishReceivePacket(
     IN PLANCE_ADAPTER Adapter,
@@ -418,9 +425,8 @@ Return Value:
     UCHAR RegUchar;
     UINT LanceSlot = 1;
     ULONG PciId;
-    ULONG PciIoBase;
     USHORT PciCommand;
-    UCHAR PciInterrupt;
+    NDIS_STATUS PciResourceStatus;
 
     BOOLEAN ConfigError = FALSE;
     NDIS_STATUS ConfigErrorCode;
@@ -480,8 +486,8 @@ Return Value:
     Adapter->BeingRemoved = FALSE;
 
     //
-    // The PCI IDs in the INF bind only PCnet devices.  Read the ID and BAR
-    // directly so the legacy ISA/EISA configuration path remains unchanged.
+    // The PCI IDs in the INF bind only PCnet devices. Read the device ID
+    // here, then use NDIS-assigned resources for its port and interrupt.
     //
     PciId = 0;
     if (NdisReadPciSlotInformation(
@@ -500,26 +506,9 @@ Return Value:
          ((PciId >> 16) == 0x2626) ||
          ((PciId >> 16) == 0x2627)))
     {
-        PciIoBase = 0;
-        PciInterrupt = 0;
         PciCommand = 0;
 
         if (NdisReadPciSlotInformation(
-                MiniportAdapterHandle,
-                0,
-                0x10,
-                &PciIoBase,
-                sizeof(PciIoBase)) != sizeof(PciIoBase) ||
-            !(PciIoBase & 1) ||
-            (PciIoBase & ~3UL) == 0 ||
-            NdisReadPciSlotInformation(
-                MiniportAdapterHandle,
-                0,
-                0x3c,
-                &PciInterrupt,
-                sizeof(PciInterrupt)) != sizeof(PciInterrupt) ||
-            PciInterrupt == 0xff ||
-            NdisReadPciSlotInformation(
                 MiniportAdapterHandle,
                 0,
                 0x04,
@@ -544,10 +533,25 @@ Return Value:
 
         Adapter->LanceCard = LANCE_PCNET;
         Adapter->IsPci = TRUE;
-        Adapter->IoBaseAddr = PciIoBase & ~3UL;
-        Adapter->InterruptNumber = (CCHAR)PciInterrupt;
-        Adapter->InterruptRequestLevel = (CCHAR)PciInterrupt;
         Adapter->AmountOfHardwareMemory = 0x10000;
+
+        NdisMSetAttributesEx(
+            MiniportAdapterHandle,
+            (NDIS_HANDLE)Adapter,
+            0,
+            NDIS_ATTRIBUTE_BUS_MASTER,
+            NdisInterfacePci
+            );
+
+        PciResourceStatus = LanceQueryPciResources(
+                                ConfigurationHandle,
+                                Adapter
+                                );
+        if (PciResourceStatus != NDIS_STATUS_SUCCESS)
+        {
+            LANCE_FREE_PHYS(Adapter, sizeof(LANCE_ADAPTER));
+            return(PciResourceStatus);
+        }
     }
 
     NdisOpenConfiguration(&Status, &ConfigHandle, ConfigurationHandle);
@@ -1014,17 +1018,7 @@ RegisterAdapter:
 
     }
 
-    if (Adapter->IsPci)
-    {
-        NdisMSetAttributesEx(
-            MiniportAdapterHandle,
-            (NDIS_HANDLE)Adapter,
-            0,
-            NDIS_ATTRIBUTE_BUS_MASTER,
-            NdisInterfacePci
-            );
-    }
-    else
+    if (!Adapter->IsPci)
     {
         NdisMSetAttributes(
             MiniportAdapterHandle,
@@ -1595,6 +1589,91 @@ LancePciHardwareDetails(
     return((BOOLEAN)(!AllZero &&
                      !AllOnes &&
                      !(Adapter->NetworkAddress[0] & 0x01)));
+}
+
+STATIC
+NDIS_STATUS
+LanceQueryPciResources(
+    IN NDIS_HANDLE ConfigurationHandle,
+    IN PLANCE_ADAPTER Adapter
+    )
+{
+    PNDIS_RESOURCE_LIST ResourceList = NULL;
+    ULONG ResourceListSize = 0;
+    ULONG AllocatedResourceListSize;
+    ULONG DescriptorOffset;
+    ULONG i;
+    BOOLEAN IoPortFound = FALSE;
+    BOOLEAN InterruptFound = FALSE;
+    NDIS_STATUS Status;
+
+    NdisMQueryAdapterResources(
+        &Status,
+        ConfigurationHandle,
+        NULL,
+        &ResourceListSize
+        );
+    if (Status != NDIS_STATUS_RESOURCES ||
+        ResourceListSize < FIELD_OFFSET(NDIS_RESOURCE_LIST, PartialDescriptors))
+    {
+        return(NDIS_STATUS_ADAPTER_NOT_FOUND);
+    }
+
+    AllocatedResourceListSize = ResourceListSize;
+    LANCE_ALLOC_PHYS(&ResourceList, ResourceListSize);
+    if (ResourceList == NULL)
+    {
+        return(NDIS_STATUS_RESOURCES);
+    }
+
+    NdisMQueryAdapterResources(
+        &Status,
+        ConfigurationHandle,
+        ResourceList,
+        &ResourceListSize
+        );
+    if (Status != NDIS_STATUS_SUCCESS)
+    {
+        NdisFreeMemory(ResourceList, AllocatedResourceListSize, 0);
+        return(Status);
+    }
+
+    DescriptorOffset =
+        FIELD_OFFSET(NDIS_RESOURCE_LIST, PartialDescriptors);
+    if (ResourceListSize < DescriptorOffset ||
+        ResourceList->Count >
+            (ResourceListSize - DescriptorOffset) /
+            sizeof(CM_PARTIAL_RESOURCE_DESCRIPTOR))
+    {
+        NdisFreeMemory(ResourceList, AllocatedResourceListSize, 0);
+        return(NDIS_STATUS_ADAPTER_NOT_FOUND);
+    }
+
+    for (i = 0; i < ResourceList->Count; i++)
+    {
+        PCM_PARTIAL_RESOURCE_DESCRIPTOR Descriptor =
+            &ResourceList->PartialDescriptors[i];
+
+        if (Descriptor->Type == CmResourceTypePort &&
+            Descriptor->u.Port.Start.HighPart == 0 &&
+            Descriptor->u.Port.Length >= 0x20)
+        {
+            Adapter->IoBaseAddr = Descriptor->u.Port.Start.LowPart;
+            IoPortFound = TRUE;
+        }
+        else if (Descriptor->Type == CmResourceTypeInterrupt)
+        {
+            Adapter->InterruptNumber = Descriptor->u.Interrupt.Vector;
+            Adapter->InterruptRequestLevel = Descriptor->u.Interrupt.Level;
+            InterruptFound = TRUE;
+        }
+    }
+
+    NdisFreeMemory(ResourceList, AllocatedResourceListSize, 0);
+
+    return((IoPortFound && InterruptFound) ?
+           NDIS_STATUS_SUCCESS :
+           NDIS_STATUS_ADAPTER_NOT_FOUND);
 }
 
 #pragma NDIS_PAGEABLE_FUNCTION(LanceRegisterAdapter)

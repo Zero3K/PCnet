@@ -436,12 +436,12 @@ typedef struct _LANCE_ADAPTER {
     //
     // Interrupt number
     //
-    CCHAR InterruptNumber;
+    UINT InterruptNumber;
 
     //
     // IRQL
     //
-    CCHAR InterruptRequestLevel;
+    UINT InterruptRequestLevel;
 
     //
     // Holds the number of transmit ring entries.
