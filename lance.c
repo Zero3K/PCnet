@@ -695,6 +695,10 @@ Return Value:
     if (Status == NDIS_STATUS_SUCCESS)
     {
         MaxMulticastList = ReturnedValue->ParameterData.IntegerData;
+        if (MaxMulticastList > 0xff)
+        {
+            MaxMulticastList = 0xff;
+        }
     }
 
     //
@@ -1374,7 +1378,7 @@ RegisterAdapter:
     //
 
     Adapter->InterruptsStopped = FALSE;
-    Adapter->MaxMulticastList = MaxMulticastList;
+    Adapter->MaxMulticastList = (UCHAR)MaxMulticastList;
 
     Status = LanceRegisterAdapter( Adapter );
 
