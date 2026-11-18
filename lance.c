@@ -689,13 +689,7 @@ Return Value:
 
     if (Adapter->SharedMemoryAllocated)
     {
-        NdisMFreeSharedMemory(
-            Adapter->MiniportAdapterHandle,
-            Adapter->AmountOfHardwareMemory,
-            FALSE,
-            Adapter->MmMappedBaseAddr,
-            Adapter->SharedMemoryPhysicalAddress
-            );
+        MmFreeContiguousMemory(Adapter->MmMappedBaseAddr);
     }
 
     DeleteAdapterMemory(Adapter);
@@ -904,7 +898,10 @@ Return Value:
 
     if (LancePciHardwareDetails(Adapter))
     {
-        ULONG PhysicalBase;
+        NDIS_PHYSICAL_ADDRESS LowestAcceptableAddress =
+            NDIS_PHYSICAL_ADDRESS_CONST(0, 0);
+        NDIS_PHYSICAL_ADDRESS HighestAcceptableAddress =
+            NDIS_PHYSICAL_ADDRESS_CONST(0, 0x00FFFFFF);
 
         //
         // Get hold of the RAP and RDP address as well
@@ -929,38 +926,20 @@ Return Value:
         }
 
         Adapter->MmMappedBaseAddr = NULL;
-        NdisMAllocateSharedMemory(
-                     Adapter->MiniportAdapterHandle,
-                     Adapter->AmountOfHardwareMemory,
-                     FALSE,
-                     &(Adapter->MmMappedBaseAddr),
-                     &(Adapter->SharedMemoryPhysicalAddress)
-                     );
+        Adapter->MmMappedBaseAddr = MmAllocateContiguousMemorySpecifyCache(
+            Adapter->AmountOfHardwareMemory,
+            LowestAcceptableAddress,
+            HighestAcceptableAddress,
+            LowestAcceptableAddress,
+            MmNonCached
+            );
 
         if (Adapter->MmMappedBaseAddr != NULL)
         {
             Status = NDIS_STATUS_SUCCESS;
-            PhysicalBase = NdisGetPhysicalAddressLow(
-                Adapter->SharedMemoryPhysicalAddress);
-
-            if (NdisGetPhysicalAddressHigh(
-                    Adapter->SharedMemoryPhysicalAddress) != 0 ||
-                PhysicalBase >
-                    (0x01000000 - Adapter->AmountOfHardwareMemory))
-            {
-                NdisMFreeSharedMemory(
-                    Adapter->MiniportAdapterHandle,
-                    Adapter->AmountOfHardwareMemory,
-                    FALSE,
-                    Adapter->MmMappedBaseAddr,
-                    Adapter->SharedMemoryPhysicalAddress
-                    );
-                Status = NDIS_STATUS_RESOURCES;
-            }
-            else
-            {
-                Adapter->SharedMemoryAllocated = TRUE;
-            }
+            Adapter->SharedMemoryPhysicalAddress =
+                MmGetPhysicalAddress(Adapter->MmMappedBaseAddr);
+            Adapter->SharedMemoryAllocated = TRUE;
         }
         else
         {
@@ -994,13 +973,7 @@ Return Value:
                 0
                 );
 
-            NdisMFreeSharedMemory(
-                Adapter->MiniportAdapterHandle,
-                Adapter->AmountOfHardwareMemory,
-                FALSE,
-                Adapter->MmMappedBaseAddr,
-                Adapter->SharedMemoryPhysicalAddress
-                );
+            MmFreeContiguousMemory(Adapter->MmMappedBaseAddr);
             Adapter->SharedMemoryAllocated = FALSE;
 
             return(NDIS_STATUS_ADAPTER_NOT_FOUND);
@@ -1065,13 +1038,7 @@ Return Value:
                 0
                 );
 
-            NdisMFreeSharedMemory(
-                Adapter->MiniportAdapterHandle,
-                Adapter->AmountOfHardwareMemory,
-                FALSE,
-                Adapter->MmMappedBaseAddr,
-                Adapter->SharedMemoryPhysicalAddress
-                );
+            MmFreeContiguousMemory(Adapter->MmMappedBaseAddr);
             Adapter->SharedMemoryAllocated = FALSE;
 
             DeleteAdapterMemory(Adapter);
@@ -1088,13 +1055,7 @@ Return Value:
                 0
                 );
 
-            NdisMFreeSharedMemory(
-                Adapter->MiniportAdapterHandle,
-                Adapter->AmountOfHardwareMemory,
-                FALSE,
-                Adapter->MmMappedBaseAddr,
-                Adapter->SharedMemoryPhysicalAddress
-                );
+            MmFreeContiguousMemory(Adapter->MmMappedBaseAddr);
             Adapter->SharedMemoryAllocated = FALSE;
 
             DeleteAdapterMemory(Adapter);
