@@ -559,7 +559,7 @@ Return Value:
     Status = NdisMAllocateMapRegisters(
         MiniportAdapterHandle,
         0,
-        NDIS_DMA_24BITS,
+        NDIS_DMA_32BITS,
         1,
         Adapter->AmountOfHardwareMemory
         );
@@ -883,10 +883,13 @@ Return Value:
     //
 
 #ifdef NDIS_NT
-    ASSERT(FIELD_OFFSET(LANCE_INITIALIZATION_BLOCK,PhysicalAddress[0]) == 2);
+    ASSERT(FIELD_OFFSET(LANCE_INITIALIZATION_BLOCK,PhysicalAddress[0]) == 4);
 #else
-    ASSERT(&((PLANCE_INITIALIZATION_BLOCK)0)->PhysicalAddress[0] == (PVOID)2);
+    ASSERT(&((PLANCE_INITIALIZATION_BLOCK)0)->PhysicalAddress[0] == (PVOID)4);
 #endif //NDIS_NT
+    ASSERT(sizeof(LANCE_INITIALIZATION_BLOCK) == 28);
+    ASSERT(sizeof(LANCE_RECEIVE_ENTRY) == 16);
+    ASSERT(sizeof(LANCE_TRANSMIT_ENTRY) == 16);
 
     //
     // Allocate memory for all of the adapter structures.
@@ -946,7 +949,7 @@ Return Value:
             if (NdisGetPhysicalAddressHigh(
                     Adapter->SharedMemoryPhysicalAddress) != 0 ||
                 PhysicalBase >
-                    (0x01000000 - Adapter->AmountOfHardwareMemory))
+                    (0xffffffffUL - (Adapter->AmountOfHardwareMemory - 1)))
             {
                 NdisMFreeSharedMemory(
                     Adapter->MiniportAdapterHandle,
@@ -979,11 +982,12 @@ Return Value:
 
         }
 
-        Adapter->CurrentMemoryFirstFree = Adapter->MmMappedBaseAddr;
+        Adapter->CurrentMemoryFirstFree = (PUCHAR)Adapter->MmMappedBaseAddr +
+                                          ((0 - PhysicalBase) & 15);
 
 
         Adapter->MemoryFirstUnavailable =
-            (PUCHAR)(Adapter->CurrentMemoryFirstFree) +
+            (PUCHAR)(Adapter->MmMappedBaseAddr) +
             Adapter->AmountOfHardwareMemory;
 
         if (!AllocateAdapterMemory(Adapter)) {
@@ -1038,7 +1042,7 @@ Return Value:
         NdisRawReadPortUshort(Adapter->IoPortBase + 0x14, &ResetValue);
         NdisStallExecution(1000);
         NdisRawWritePortUshort(Adapter->RAP, 20);
-        NdisRawWritePortUshort(Adapter->BDP, 0);
+        NdisRawWritePortUshort(Adapter->BDP, 2);
 
         LanceSyncStopChip(Adapter);
 
@@ -1870,6 +1874,11 @@ Return Value:
         i < Adapter->NumberOfReceiveRings;
         i++,CurrentReceiveEntry++
         ) {
+
+        LANCE_ZERO_MEMORY_FOR_HARDWARE(
+            (PUCHAR)CurrentReceiveEntry,
+            sizeof(LANCE_RECEIVE_ENTRY)
+            );
 
         LANCE_ALLOCATE_MEMORY_FOR_HARDWARE(
             Adapter,
@@ -3069,14 +3078,9 @@ Return Value:
                   Adapter->TransmitRing
               );
 
-    LANCE_WRITE_HARDWARE_LOW_PART_ADDRESS(
-         Adapter->InitBlock->LowTransmitRingAddress,
-         LANCE_GET_LOW_PART_ADDRESS(PhysAdr)
-     );
-
-    LANCE_WRITE_HARDWARE_HIGH_PART_ADDRESS(
-         Adapter->InitBlock->HighTransmitRingAddress,
-         LANCE_GET_HIGH_PART_ADDRESS(PhysAdr)
+    LANCE_WRITE_HARDWARE_MEMORY_ULONG(
+         Adapter->InitBlock->TransmitRingAddress,
+         PhysAdr
      );
 
     //
@@ -3101,24 +3105,15 @@ Return Value:
         );
     }
 
-    LANCE_WRITE_HARDWARE_LOW_PART_ADDRESS(
-        Adapter->InitBlock->LowReceiveRingAddress,
-        LANCE_GET_LOW_PART_ADDRESS(PhysAdr)
+    LANCE_WRITE_HARDWARE_MEMORY_ULONG(
+        Adapter->InitBlock->ReceiveRingAddress,
+        PhysAdr
     );
 
-    LANCE_WRITE_HARDWARE_HIGH_PART_ADDRESS(
-        Adapter->InitBlock->HighReceiveRingAddress,
-        LANCE_GET_HIGH_PART_ADDRESS(PhysAdr)
-    );
-
-    LANCE_WRITE_HARDWARE_MEMORY_UCHAR(
-        Adapter->InitBlock->TransmitLengthLow5BitsReserved,
-        (UCHAR)(Adapter->LogNumberTransmitRings << 5)
-    );
-
-    LANCE_WRITE_HARDWARE_MEMORY_UCHAR(
-        Adapter->InitBlock->ReceiveLengthLow5BitsReserved,
-        (UCHAR)(Adapter->LogNumberReceiveRings << 5)
+    LANCE_WRITE_HARDWARE_MEMORY_USHORT(
+        Adapter->InitBlock->RingLengths,
+        (USHORT)((Adapter->LogNumberReceiveRings << 4) |
+                 (Adapter->LogNumberTransmitRings << 12))
     );
 
     //

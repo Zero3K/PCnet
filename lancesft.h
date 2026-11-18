@@ -677,19 +677,19 @@ typedef enum _LANCE_PROC_ID {
 //
 // This macro is used to "allocate" memory for the structures that
 // must be shared with the hardware.  It assigns a pvoid that is
-// at least quadword aligned.
+// at least 16-byte aligned.
 //
 #define LANCE_ALLOCATE_MEMORY_FOR_HARDWARE(A,S,P) \
 { \
     PLANCE_ADAPTER _Adapter = (A); \
-    UINT _Size = (((S) + 7)/8)*8; \
+    UINT _Size = (((S) + 15)/16)*16; \
     PVOID _HighWater; \
     if (!_Size) { \
         *(P) = NULL; \
     } else { \
         _HighWater = ((PCHAR)_Adapter->CurrentMemoryFirstFree) + _Size; \
         if (((PUCHAR)_HighWater) > \
-            (((PUCHAR)_Adapter->MemoryFirstUnavailable) + 1)) { \
+            ((PUCHAR)_Adapter->MemoryFirstUnavailable)) { \
             *(P) = NULL; \
         } else { \
             *(P) = _Adapter->CurrentMemoryFirstFree; \

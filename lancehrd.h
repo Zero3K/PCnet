@@ -88,19 +88,17 @@ Notes:
     ((USHORT)((Adr) & 0xffff))
 
 #define LANCE_GET_HIGH_PART_ADDRESS(Adr) \
-    ((UCHAR)(((ULONG)(Adr) >> 16) & 0xff))
+    ((USHORT)((ULONG)(Adr) >> 16))
 
 typedef struct _LANCE_INITIALIZATION_BLOCK {
 
     USHORT ModeRegister;
+    USHORT RingLengths;
     UCHAR PhysicalAddress[6];
+    USHORT Reserved;
     UCHAR LogicalAddressFilter[8];
-    USHORT LowReceiveRingAddress;
-    UCHAR HighReceiveRingAddress;
-    UCHAR ReceiveLengthLow5BitsReserved;
-    USHORT LowTransmitRingAddress;
-    UCHAR HighTransmitRingAddress;
-    UCHAR TransmitLengthLow5BitsReserved;
+    ULONG ReceiveRingAddress;
+    ULONG TransmitRingAddress;
 
 } LANCE_INITIALIZATION_BLOCK,*PLANCE_INITIALIZATION_BLOCK;
 
@@ -139,6 +137,9 @@ typedef struct _LANCE_INITIALIZATION_BLOCK {
 #define LANCE_WRITE_HARDWARE_MEMORY_USHORT(Destination, Source) \
     NdisWriteRegisterUshort((PUSHORT)(&Destination), (USHORT)(Source))
 
+#define LANCE_WRITE_HARDWARE_MEMORY_ULONG(Destination, Source) \
+    NdisWriteRegisterUlong((PULONG)(&Destination), (ULONG)(Source))
+
 #define LANCE_READ_HARDWARE_MEMORY_UCHAR(Source, Destination) \
     NdisReadRegisterUchar((PUCHAR)(&Source), Destination)
 
@@ -163,12 +164,19 @@ typedef struct _LANCE_INITIALIZATION_BLOCK {
 typedef struct _LANCE_RECEIVE_ENTRY {
 
     //
-    // 24 bit pointer to the buffer for the receive
+    // 32 bit pointer to the buffer for the receive
     // data.  This is written by the host and unchanged
     // by the LANCE.
     //
-    USHORT LowReceiveBufferAddress;
-    UCHAR HighReceiveBufferAddress;
+    ULONG ReceiveBufferAddress;
+
+    //
+    // This is the twos compliment of the buffer length.
+    //
+    // NOTE: The high order 4 bits must be enabled.
+    //
+    USHORT BufferByteCount;
+    UCHAR ReservedStatus;
 
     //
     // This char field contains numerous bits describing
@@ -178,18 +186,13 @@ typedef struct _LANCE_RECEIVE_ENTRY {
     UCHAR ReceiveSummaryBits;
 
     //
-    // This is the twos compliment of the buffer length.
-    //
-    // NOTE: The high order 4 bits must be enabled.
-    //
-    USHORT BufferByteCount;
-
-    //
     // This is the length of the data in the packet.
     //
     // Note that the high order 4 bits are undefined.
     //
     USHORT MessageLength;
+    USHORT ReservedMessage;
+    ULONG Reserved;
 
 } LANCE_RECEIVE_ENTRY,*PLANCE_RECEIVE_ENTRY;
 
@@ -213,12 +216,7 @@ typedef struct _LANCE_RECEIVE_ENTRY {
     PLANCE_RECEIVE_ENTRY _Rd = (Rd); \
     ULONG _Offset;\
     _Offset = LANCE_GET_HARDWARE_PHYSICAL_ADDRESS(_Adptr, _Adr);\
-    LANCE_WRITE_HARDWARE_LOW_PART_ADDRESS(\
-        _Rd->LowReceiveBufferAddress,\
-        (USHORT)((ULONG)_Offset) & 0xffff); \
-    LANCE_WRITE_HARDWARE_HIGH_PART_ADDRESS(\
-        _Rd->HighReceiveBufferAddress,\
-        (UCHAR)(((ULONG)_Offset) >> 16) & 0xff); \
+    LANCE_WRITE_HARDWARE_MEMORY_ULONG(_Rd->ReceiveBufferAddress, _Offset); \
 }
 
 
@@ -282,16 +280,10 @@ typedef struct _LANCE_RECEIVE_ENTRY {
 typedef struct _LANCE_TRANSMIT_ENTRY {
 
     //
-    // 24 bit pointer to the transmit buffer.  This is
+    // 32 bit pointer to the transmit buffer.  This is
     // written by the host and unchanged by the LANCE.
     //
-    USHORT LowTransmitBufferAddress;
-    UCHAR HighTransmitBufferAddress;
-
-    //
-    // This field contains summary information about the packet.
-    //
-    UCHAR TransmitSummaryBits;
+    ULONG TransmitBufferAddress;
 
     //
     // This field contains the "twos complement" of the length
@@ -300,12 +292,20 @@ typedef struct _LANCE_TRANSMIT_ENTRY {
     // NOTE: The high order four bits must be enabled.
     //
     USHORT BufferByteCount;
+    UCHAR ReservedStatus;
+
+    //
+    // This field contains summary information about the packet.
+    //
+    UCHAR TransmitSummaryBits;
 
     //
     // This short contains the error summary information for the
     // ring entry.
     //
+    USHORT TimeDomainReflectometry;
     USHORT ErrorSummaryInfo;
+    ULONG Reserved;
 
 } LANCE_TRANSMIT_ENTRY,*PLANCE_TRANSMIT_ENTRY;
 
@@ -346,14 +346,7 @@ typedef struct _LANCE_TRANSMIT_ENTRY {
     ULONG _Offset;\
     PLANCE_ADAPTER _Adptr = (Adptr);\
     _Offset = LANCE_GET_HARDWARE_PHYSICAL_ADDRESS(_Adptr, _Adr);\
-    LANCE_WRITE_HARDWARE_LOW_PART_ADDRESS(\
-        _Td->LowTransmitBufferAddress,\
-        (USHORT)(((ULONG)_Offset) & 0xffff)\
-        );\
-    LANCE_WRITE_HARDWARE_HIGH_PART_ADDRESS(\
-        _Td->HighTransmitBufferAddress,\
-        (UCHAR)((((ULONG)_Offset) >> 16) & 0xff)\
-        );\
+    LANCE_WRITE_HARDWARE_MEMORY_ULONG(_Td->TransmitBufferAddress, _Offset); \
 }
 
 
