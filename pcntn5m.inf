@@ -1,0 +1,132 @@
+
+; pcntn5m.inf
+; IBM 10/100 Ethernet MCA Adapter (San Remo)
+; Supports Windows 2000, XP, Server 2003, Windows 7 x86 and x64.
+
+[Version]
+Signature   = "$Windows NT$"
+Class       = Net
+ClassGUID   = {4d36e972-e325-11ce-bfc1-08002be10318}
+Provider    = %IBM%
+DriverVer   = 02/14/2024,5.0.0.0
+CatalogFile.NTamd64 = pcntn5m.cat
+
+[Manufacturer]
+%IBM% = IBM,NT,NTx86,NTamd64
+
+; Windows 2000
+[IBM.NT]
+%PCNTN5M.DeviceDesc%       = PCNTN5M.ndi, Root\PCNTN5M
+%PCNTN5M.DeviceDesc%       = PCNTN5M.ndi, *PCNTN5M
+
+%PCNTN5M_PCI0.DeviceDesc%  = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2000
+%PCNTN5M_PCI1.DeviceDesc%  = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2001
+%PCNTN5M_PCI3.DeviceDesc%  = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2625
+%PCNTN5M_PCI3.DeviceDesc%  = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2626
+
+; Windows XP, Server 2003, Vista and Windows 7 x86
+[IBM.NTx86]
+%PCNTN5M.DeviceDesc%       = PCNTN5M.ndi, Root\PCNTN5M
+%PCNTN5M.DeviceDesc%       = PCNTN5M.ndi, *PCNTN5M
+
+%PCNTN5M_PCI0.DeviceDesc%  = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2000
+%PCNTN5M_PCI1.DeviceDesc%  = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2001
+%PCNTN5M_PCI3.DeviceDesc%  = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2625
+%PCNTN5M_PCI3.DeviceDesc%  = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2626
+
+; Windows 7 x64 / AMD64
+[IBM.NTamd64]
+%PCNTN5M.DeviceDesc%       = PCNTN5M.ndi, Root\PCNTN5M
+%PCNTN5M.DeviceDesc%       = PCNTN5M.ndi, *PCNTN5M
+
+%PCNTN5M_PCI0.DeviceDesc%  = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2000
+%PCNTN5M_PCI1.DeviceDesc%  = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2001
+%PCNTN5M_PCI3.DeviceDesc%  = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2625
+%PCNTN5M_PCI3.DeviceDesc%  = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2626
+
+; MCA adapter installation
+[PCNTN5M.ndi]
+Characteristics = 0x4
+BusType         = 3    ; Micro Channel Architecture (MCA)
+AddReg          = PCNTN5M.ndi.reg
+CopyFiles       = PCNTN5M.CopyFiles
+
+[PCNTN5M.ndi.Services]
+AddService = PCNTN5M, 2, PCNTN5M.Service, PCNTN5M.EventLog
+
+[PCNTN5M.ndi.reg]
+HKR, Ndi,              Service,    0, "PCNTN5M"
+HKR, Ndi\Interfaces,   UpperRange, 0, "ndis5"
+HKR, Ndi\Interfaces,   LowerRange, 0, "ethernet"
+
+; NDIS network interface classification
+HKR, Ndi, *IfType,            0x00010003, 6
+HKR, Ndi, *MediaType,         0x00010003, 0
+HKR, Ndi, *PhysicalMediaType, 0x00010003, 0
+
+; Default MCA hardware resources
+HKR, , IOAddress,   0x00010001, 0x00001C00
+HKR, , Interrupt,   0x00010001, 10
+HKR, , DmaChannel,  0x00010001, 5
+HKR, , BUS_TO_SCAN, 0x00000000, "MCA"
+
+; PCI adapter installation
+[PCNTN5M_PCI.ndi]
+Characteristics = 0x4
+BusType         = 5    ; PCI
+AddReg          = PCNTN5M_PCI.ndi.reg
+CopyFiles       = PCNTN5M.CopyFiles
+
+[PCNTN5M_PCI.ndi.Services]
+AddService = PCNTN5M, 2, PCNTN5M.Service, PCNTN5M.EventLog
+
+[PCNTN5M_PCI.ndi.reg]
+HKR, Ndi,              Service,    0, "PCNTN5M"
+HKR, Ndi\Interfaces,   UpperRange, 0, "ndis5"
+HKR, Ndi\Interfaces,   LowerRange, 0, "ethernet"
+
+HKR, Ndi, *IfType,            0x00010003, 6
+HKR, Ndi, *MediaType,         0x00010003, 0
+HKR, Ndi, *PhysicalMediaType, 0x00010003, 0
+
+HKR, , BusType, 0x00010001, 5
+
+; Kernel driver service
+[PCNTN5M.Service]
+DisplayName    = %PCNTN5M.Service.DispName%
+ServiceType    = 1
+StartType      = 3
+ErrorControl   = 1
+ServiceBinary  = %12%\pcntn5m.sys
+LoadOrderGroup = NDIS
+
+; Event logging
+[PCNTN5M.EventLog]
+AddReg = PCNTN5M.EventLog.reg
+
+[PCNTN5M.EventLog.reg]
+HKR,, EventMessageFile, 0x00020000, "%%SystemRoot%%\System32\netevent.dll"
+HKR,, TypesSupported,   0x00010001, 7
+
+; Driver file
+[PCNTN5M.CopyFiles]
+pcntn5m.sys
+
+[DestinationDirs]
+PCNTN5M.CopyFiles = 12
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+pcntn5m.sys = 1
+
+[Strings]
+IBM                      = "IBM"
+PCNTN5M.DeviceDesc       = "IBM 10/100 Ethernet MCA Adapter (San Remo)"
+PCNTN5M.Service.DispName = "IBM 10/100 Ethernet MCA Miniport"
+DiskName                 = "IBM San Remo Driver Disk"
+
+PCNTN5M_PCI0.DeviceDesc  = "AMD PCnet Ethernet Adapter"
+PCNTN5M_PCI1.DeviceDesc  = "AMD PCnet-PCI II Ethernet Adapter (Am79C970A)"
+PCNTN5M_PCI3.DeviceDesc  = "AMD PCnet-FAST III Ethernet Adapter (Am79C973)"
