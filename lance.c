@@ -125,6 +125,17 @@ UINT LanceGlobalSupportedOids[] = {
 //
 #define LANCE_CSR0_CLEAR_INTERRUPT_BITS ((USHORT)0x7f00)
 
+typedef struct _LANCE_INTERRUPT_STATUS {
+    PLANCE_ADAPTER Adapter;
+    USHORT Csr;
+} LANCE_INTERRUPT_STATUS, *PLANCE_INTERRUPT_STATUS;
+
+STATIC
+BOOLEAN
+LanceSyncReadInterruptStatus(
+    IN PVOID Context
+    );
+
 VOID
 LanceDeferredTimerRoutine(
     IN PVOID SystemSpecific1,
@@ -1260,6 +1271,13 @@ Return Value:
         )
         {
             Adapter->FirstInitialization = FALSE;
+            LocalCSR0Value &= ~LANCE_CSR0_INITIALIZATION_DONE;
+        }
+
+        if (LocalCSR0Value & LANCE_CSR0_CLEAR_INTERRUPT_BITS)
+        {
+            Adapter->PendingInterruptStatus |= LocalCSR0Value;
+            *QueueDpc = TRUE;
         }
     }
 
@@ -1267,6 +1285,21 @@ Return Value:
 
     return;
 }
+
+STATIC
+BOOLEAN
+LanceSyncReadInterruptStatus(
+    IN PVOID Context
+    )
+{
+    PLANCE_INTERRUPT_STATUS Status = (PLANCE_INTERRUPT_STATUS)Context;
+
+    Status->Csr = Status->Adapter->PendingInterruptStatus;
+    Status->Adapter->PendingInterruptStatus = 0;
+
+    return TRUE;
+}
+
 STATIC
 VOID
 LanceDisableInterrupt(
@@ -1383,9 +1416,11 @@ Return Value:
     // Holds a value of csr0.
     //
     USHORT Csr = 0;
-    USHORT LocalCSR0Value;
+    LANCE_INTERRUPT_STATUS InterruptStatus;
 
     LOG(IN_DPC);
+
+    InterruptStatus.Adapter = Adapter;
 
     //
     // Loop until there are no more processing sources.
@@ -1393,30 +1428,14 @@ Return Value:
     for (;;)
     {
         //
-        // We don't need to select csr0, as the only way we could get
-        // an interrupt is to have already selected 0.
+        // Retrieve the interrupt causes acknowledged by the ISR.
         //
-        LANCE_ISR_READ_RDP(Adapter, &LocalCSR0Value);
-
-        if (LocalCSR0Value & LANCE_CSR0_INTERRUPT_FLAG)
-        {
-            //
-            // It's our interrupt. Clear only those bits that we got
-            // in this read of csr0.  We do it this way incase any new
-            // reasons for interrupts occur between the time that we
-            // read csr0 and the time that we clear the bits.
-            //
-            LANCE_ISR_WRITE_RDP(
-                Adapter,
-                (USHORT)((LANCE_CSR0_CLEAR_INTERRUPT_BITS & LocalCSR0Value) |
-                   LANCE_CSR0_INTERRUPT_ENABLE)
-            );
-
-            //
-            // Or the csr value into the adapter version of csr 0.
-            //
-            Csr |= LocalCSR0Value;
-        }
+        NdisMSynchronizeWithInterrupt(
+            &Adapter->Interrupt,
+            LanceSyncReadInterruptStatus,
+            &InterruptStatus
+        );
+        Csr |= InterruptStatus.Csr;
 
         //
         // Check the interrupt source and other reasons
@@ -1473,6 +1492,8 @@ Return Value:
             //
             ResetRequestType = Adapter->ResetRequestType;
 
+            LanceStartChip(Adapter);
+
             if (ResetRequestType == NdisRequestSetInformation)
             {
                 //
@@ -1500,11 +1521,6 @@ Return Value:
                     );
                 }
             }
-
-            //
-            // Restart the chip.
-            //
-            LanceStartChip(Adapter);
 
             goto LoopBottom;
         }
@@ -4208,6 +4224,8 @@ Return Value:
     // Set the RDP to stop chip.
     //
     LANCE_ISR_WRITE_RDP(Adapter, LANCE_CSR0_STOP);
+
+    Adapter->PendingInterruptStatus = 0;
 
     //
     // Select CSR0 again.

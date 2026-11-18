@@ -288,6 +288,8 @@ typedef struct _LANCE_ADAPTER {
 
     NDIS_MINIPORT_TIMER DeferredTimer;
 
+    USHORT PendingInterruptStatus;
+
     //
     // Non OS fields of the adapter.
     //
