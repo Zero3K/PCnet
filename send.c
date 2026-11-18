@@ -215,13 +215,7 @@ Return Value:
 
         } else {
 
-            //
-            // Certain hardware implementation (Decstation) use a dual ported
-            // memory to communicate with the hardware.  This is reasonable since
-            // it reduces bus contention.  When using the dual ported memory, all
-            // send data must be moved to buffers allocated from the dual ported
-            // memory.
-            //
+            // Send data is copied into buffers allocated from adapter memory.
 
             if (TotalVirtualLength <= LANCE_SMALL_BUFFER_SIZE) {
 
@@ -434,4 +428,3 @@ Return Value:
 
     return Status;
 }
-
