@@ -39,12 +39,6 @@ Revision History:
 #define _LANCEHARDWARE_
 
 //
-// Compressed ID for DE422 EISA adapter
-//
-
-#define DE422_COMPRESSED_ID     0x2042a310
-
-//
 // All registers on the LANCE are 16 bits.
 //
 
@@ -82,8 +76,6 @@ Revision History:
 #define LANCE_NICSR_LED_ON                ((USHORT)(0x0001))
 #define LANCE_NICSR_INT_ON                ((USHORT)(0x0002))
 #define LANCE_NICSR_IMASK                 ((USHORT)(0x0004))
-#define LANCE_NICSR_128K                  ((USHORT)(0x0008))
-#define LANCE_NICSR_BUFFER_SIZE           ((USHORT)(0x0020))
 
 
 //
@@ -118,19 +110,6 @@ Revision History:
 #define LANCE_DE201_RAP_OFFSET          ((ULONG)(0x006))
 #define LANCE_DE201_RDP_OFFSET          ((ULONG)(0x004))
 #define LANCE_DE201_NETWORK_OFFSET      ((ULONG)(0x00C))
-
-#define LANCE_DE422_NICSR_ADDRESS        ((ULONG)(0xC00))
-#define LANCE_DE422_RAP_OFFSET           ((ULONG)(0x006))
-#define LANCE_DE422_RDP_OFFSET           ((ULONG)(0x004))
-#define LANCE_DE422_NETWORK_OFFSET       ((ULONG)(0x00C))
-#define LANCE_DE422_EISA_CONFIGURATION_OFFSET   ((ULONG)(0x00C))
-#define LANCE_DE422_EXTENDED_MEMORY_BASE_OFFSET ((ULONG)(0x008))
-#define LANCE_DE422_EISA_IDENTIFICATION_OFFSET  ((ULONG)(0x080))
-#define LANCE_DE422_EISA_CONTROL_OFFSET         ((ULONG)(0x084))
-
-
-
-
 
 #define LANCE_NUMBER_OF_TRANSMIT_RINGS ((UINT)64)
 #define LANCE_LOG_TRANSMIT_RINGS ((UINT)6)

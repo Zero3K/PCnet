@@ -177,7 +177,7 @@ Return Value:
 
 
 
-    if (!(Adapter->LanceCard & (LANCE_DE201 | LANCE_DE422))) {
+    if (!(Adapter->LanceCard & LANCE_DE201)) {
 
         if (Adapter->LanceCard == LANCE_DEPCA){
 
@@ -410,7 +410,7 @@ Return Value:
         NdisRawWritePortUshort((ULONG)(Adapter->Nicsr), 0x00);
     }
 
-    if (Adapter->LanceCard & (LANCE_DE201 | LANCE_DE422)) {
+    if (Adapter->LanceCard & LANCE_DE201) {
 
         //
         // Reset Network Interface Control Status Register

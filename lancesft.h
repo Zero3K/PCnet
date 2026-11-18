@@ -37,9 +37,7 @@ Revision History:
 
        Added  InterruptRequestLevel to the _LANCE_ADAPTER structure because
        'lance.c' was passing the InterruptVector as the IRQL to the interrupt
-       connect routine which is not correct.  This works on JAZZ because the
-       JAZZ HalGetInterruptVector is hardcoded to return a fixed IRQL for
-       EISA devices.
+       connect routine which is not correct.
 
        Removed PhysicalBuffersContained and UsedLanceBuffer field from
        _ADAPTER structure.  SeanSe says that the code related to this
@@ -136,7 +134,6 @@ extern NDIS_PHYSICAL_ADDRESS HighestAcceptableMax;
 #define LANCE_DE201      0x02    // DE201 card
 #define LANCE_DEPCA      0x04    // Card in a Dec PC x86 machine
 #define LANCE_DECST      0x08    // Card in a decstation
-#define LANCE_DE422      0x10    // DE422 card
 #define LANCE_DECTC      0x20    // TurboChannel PMAD-AA option
 #define LANCE_PCNET      0x40    // PCI PCnet-compatible adapter
 
@@ -144,7 +141,6 @@ extern NDIS_PHYSICAL_ADDRESS HighestAcceptableMax;
 #define LANCE_DE201_NAME LANCE_DEFAULT_NAME
 #define LANCE_DEPCA_NAME LANCE_DEFAULT_NAME
 #define LANCE_DECST_NAME LANCE_DEFAULT_NAME
-#define LANCE_DE422_NAME LANCE_DEFAULT_NAME
 #define LANCE_DECTC_NAME LANCE_DEFAULT_NAME
 #define LANCE_DEFAULT_NAME "\\Device\\Lance01"
 
@@ -402,16 +398,6 @@ typedef struct _LANCE_ADAPTER {
     BOOLEAN MapRegistersAllocated;
     BOOLEAN IoPortsRegistered;
     NDIS_PHYSICAL_ADDRESS SharedMemoryPhysicalAddress;
-
-    //
-    // Slot Number the De422 is in.
-    //
-    UINT SlotNumber;
-
-    //
-    // Default information to add to the NICSR register value
-    //
-    USHORT NicsrDefaultValue;
 
     //
     // Have the interrupts from the card been turned off.
@@ -846,7 +832,7 @@ typedef struct _LANCE_SYNCH_CONTEXT {
     PLANCE_ADAPTER _A = A; \
     LANCE_SYNCH_CONTEXT _C; \
     _C.Adapter = _A; \
-    _C.LocalWrite = (C | _A->NicsrDefaultValue); \
+    _C.LocalWrite = C; \
     NdisMSynchronizeWithInterrupt( \
         &(_A)->Interrupt, \
         LanceSyncWriteNicsr, \
