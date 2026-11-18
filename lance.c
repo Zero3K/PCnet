@@ -30,7 +30,6 @@ Revision History:
 #include <ndis.h>
 #include "lancehrd.h"
 #include "lancesft.h"
-#include "dectc.h"
 #include "keywords.h"
 
 //#if DBG
@@ -385,21 +384,8 @@ Return Value:
 
     NDIS_HANDLE ConfigHandle;
     PNDIS_CONFIGURATION_PARAMETER ReturnedValue;
-    NDIS_STRING IoAddressStr = IOADDRESS;
     NDIS_STRING MaxMulticastListStr = MAXMULTICASTLIST;
     NDIS_STRING NetworkAddressStr = NETWORKADDRESS;
-    NDIS_STRING InterruptStr = INTERRUPT;
-    NDIS_STRING CardStr = CARDTYPE;
-    NDIS_STRING MemoryBaseAddrStr = MEMMAPPEDBASEADDRESS;
-
-#if NDIS2
-    NDIS_STRING DE201Str = NDIS_STRING_CONST("DE201");
-    NDIS_STRING DE100Str = NDIS_STRING_CONST("DE100");
-    NDIS_STRING DEPCAStr = NDIS_STRING_CONST("DEPCA");
-    NDIS_STRING DECTCStr = NDIS_STRING_CONST("DECTC");
-    NDIS_STRING DE200Str = NDIS_STRING_CONST("DE200");
-    NDIS_STRING DE101Str = NDIS_STRING_CONST("DE101");
-#endif
 
     UINT MaxMulticastList = 32;
     PVOID NetAddress;
@@ -409,8 +395,6 @@ Return Value:
     USHORT PciCommand;
     NDIS_STATUS PciResourceStatus;
 
-    BOOLEAN ConfigError = FALSE;
-    NDIS_STATUS ConfigErrorCode;
     NDIS_STATUS Status;
 
 
@@ -452,18 +436,7 @@ Return Value:
 
     Adapter->MaxLookAhead = LANCE_MAX_LOOKAHEAD;
 
-    //
-    // Start with the default card
-    //
-
-    Adapter->LanceCard = LANCE_DE201;
     Adapter->MiniportAdapterHandle = MiniportAdapterHandle;
-
-    Adapter->IoBaseAddr = LANCE_DE201_PRI_NICSR_ADDRESS;
-    Adapter->HardwareBaseAddr = LANCE_DE201_BASE;
-    Adapter->AmountOfHardwareMemory = LANCE_DE201_HARDWARE_MEMORY;
-    Adapter->InterruptNumber = LANCE_DE201_INTERRUPT_VECTOR;
-    Adapter->InterruptRequestLevel = LANCE_DE201_INTERRUPT_VECTOR;
     Adapter->BeingRemoved = FALSE;
 
     //
@@ -512,8 +485,6 @@ Return Value:
             return(NDIS_STATUS_ADAPTER_NOT_FOUND);
         }
 
-        Adapter->LanceCard = LANCE_PCNET;
-        Adapter->IsPci = TRUE;
         Adapter->AmountOfHardwareMemory = 0x10000;
 
         NdisMSetAttributesEx(
@@ -534,127 +505,17 @@ Return Value:
             return(PciResourceStatus);
         }
     }
+    else
+    {
+        LANCE_FREE_PHYS(Adapter, sizeof(LANCE_ADAPTER));
+        return(NDIS_STATUS_ADAPTER_NOT_FOUND);
+    }
 
     NdisOpenConfiguration(&Status, &ConfigHandle, ConfigurationHandle);
     if (Status != NDIS_STATUS_SUCCESS)
     {
         LANCE_FREE_PHYS(Adapter, sizeof(LANCE_ADAPTER));
         return(Status);
-    }
-
-    if (!Adapter->IsPci)
-    {
-#if NDIS2
-    //
-    // Read Card Type
-    //
-
-    NdisReadConfiguration(
-        &Status,
-        &ReturnedValue,
-        ConfigHandle,
-        &CardStr,
-        NdisParameterString
-    );
-    if (Status == NDIS_STATUS_SUCCESS)
-    {
-        if (NdisEqualString (&ReturnedValue->ParameterData.StringData, &DE201Str, 1)) {
-            Adapter->LanceCard = LANCE_DE201;
-        } else if (NdisEqualString (&ReturnedValue->ParameterData.StringData, &DE100Str, 1)) {
-            Adapter->LanceCard = LANCE_DE100;
-        } else if (NdisEqualString (&ReturnedValue->ParameterData.StringData, &DEPCAStr, 1)) {
-            Adapter->LanceCard = LANCE_DEPCA;
-#ifndef i386
-        } else if (NdisEqualString (&ReturnedValue->ParameterData.StringData, &DECTCStr, 1)) {
-            Adapter->LanceCard = LANCE_DECTC;
-            ConfigErrorCode = LanceDecTcGetConfiguration(ConfigHandle, Adapter);
-            if ( ConfigErrorCode != NDIS_STATUS_SUCCESS ) {
-            ConfigError = TRUE;
-            }
-#endif // i386
-        } else if (NdisEqualString (&ReturnedValue->ParameterData.StringData, &DE200Str, 1)) {
-            //
-            // This is the De200, but it operates exactly like the 201.
-            //
-            Adapter->LanceCard = LANCE_DE201;
-        } else if (NdisEqualString (&ReturnedValue->ParameterData.StringData, &DE101Str, 1)) {
-            //
-            // This is the De101, but it operates exactly like the 100.
-            //
-            Adapter->LanceCard = LANCE_DE100;
-        } else {
-            ConfigError = TRUE;
-            ConfigErrorCode = NDIS_ERROR_CODE_UNSUPPORTED_CONFIGURATION;
-            goto RegisterAdapter;
-        }
-
-    }
-
-
-#else
-    //
-    // Read Card Type
-    //
-
-    NdisReadConfiguration(
-        &Status,
-        &ReturnedValue,
-        ConfigHandle,
-        &CardStr,
-        NdisParameterInteger
-    );
-    if (Status == NDIS_STATUS_SUCCESS)
-    {
-        if (ReturnedValue->ParameterData.IntegerData == 2)
-        {
-            Adapter->LanceCard = LANCE_DE201;
-        }
-        else if (ReturnedValue->ParameterData.IntegerData == 1)
-        {
-            Adapter->LanceCard = LANCE_DE100;
-        }
-        else if (ReturnedValue->ParameterData.IntegerData == 3)
-        {
-            Adapter->LanceCard = LANCE_DEPCA;
-
-#ifndef i386
-        }
-        else if (ReturnedValue->ParameterData.IntegerData == 4)
-        {
-            Adapter->LanceCard = LANCE_DECTC;
-
-            ConfigErrorCode = LanceDecTcGetConfiguration(ConfigHandle, Adapter);
-
-            if ( ConfigErrorCode != NDIS_STATUS_SUCCESS )
-            {
-                ConfigError = TRUE;
-            }
-#endif // i386
-
-        }
-        else if (ReturnedValue->ParameterData.IntegerData == 6)
-        {
-            //
-            // This is the De200, but it operates exactly like the 201.
-            //
-            Adapter->LanceCard = LANCE_DE201;
-        }
-        else if (ReturnedValue->ParameterData.IntegerData == 7)
-        {
-            //
-            // This is the De101, but it operates exactly like the 100.
-            //
-            Adapter->LanceCard = LANCE_DE100;
-        }
-        else
-        {
-            ConfigError = TRUE;
-            ConfigErrorCode = NDIS_ERROR_CODE_UNSUPPORTED_CONFIGURATION;
-
-            goto RegisterAdapter;
-        }
-    }
-#endif
     }
 
     //
@@ -695,258 +556,38 @@ Return Value:
         );
     }
 
-    if (Adapter->LanceCard & (LANCE_DE201 | LANCE_DE100))
-    {
-        //
-        // Read IoAddress
-        //
-        NdisReadConfiguration(
-            &Status,
-            &ReturnedValue,
-            ConfigHandle,
-            &IoAddressStr,
-            NdisParameterHexInteger
-        );
-        if (Status == NDIS_STATUS_SUCCESS)
-        {
-            if (ReturnedValue->ParameterData.IntegerData == LANCE_DE201_PRI_NICSR_ADDRESS)
-            {
-                Adapter->IoBaseAddr = LANCE_DE201_PRI_NICSR_ADDRESS;
-            }
-            else if (ReturnedValue->ParameterData.IntegerData == LANCE_DE201_SEC_NICSR_ADDRESS)
-            {
-                Adapter->IoBaseAddr = LANCE_DE201_SEC_NICSR_ADDRESS;
-            }
-            else
-            {
-                ConfigError = TRUE;
-                ConfigErrorCode = NDIS_ERROR_CODE_BAD_IO_BASE_ADDRESS;
-
-                goto RegisterAdapter;
-            }
-        }
-
-        //
-        // Read Interrupt
-        //
-        NdisReadConfiguration(
-            &Status,
-            &ReturnedValue,
-            ConfigHandle,
-            &InterruptStr,
-            NdisParameterInteger
-        );
-        if (Status == NDIS_STATUS_SUCCESS)
-        {
-            Adapter->InterruptNumber = (CCHAR)ReturnedValue->ParameterData.IntegerData;
-            Adapter->InterruptRequestLevel = Adapter->InterruptNumber;
-
-            if (Adapter->LanceCard == LANCE_DE201)
-            {
-                if (!((Adapter->InterruptNumber == 5) ||
-                      (Adapter->InterruptNumber == 9) ||
-                      (Adapter->InterruptNumber == 10) ||
-                      (Adapter->InterruptNumber == 11) ||
-                      (Adapter->InterruptNumber == 15))) {
-
-                    ConfigError = TRUE;
-                    ConfigErrorCode = NDIS_ERROR_CODE_UNSUPPORTED_CONFIGURATION;
-
-                    goto RegisterAdapter;
-
-                }
-
-            } else {
-
-                if (!((Adapter->InterruptNumber == 2) ||
-                      (Adapter->InterruptNumber == 3) ||
-                      (Adapter->InterruptNumber == 4) ||
-                      (Adapter->InterruptNumber == 5) ||
-                      (Adapter->InterruptNumber == 7))) {
-
-                    ConfigError = TRUE;
-                    ConfigErrorCode = NDIS_ERROR_CODE_UNSUPPORTED_CONFIGURATION;
-
-                    goto RegisterAdapter;
-
-                }
-
-            }
-
-        }
-
-
-
-        //
-        // Read MemoryBaseAddress
-        //
-
-        NdisReadConfiguration(
-                &Status,
-                &ReturnedValue,
-                ConfigHandle,
-                &MemoryBaseAddrStr,
-                NdisParameterHexInteger
-                );
-
-        if (Status == NDIS_STATUS_SUCCESS) {
-
-#if NDIS2
-            Adapter->HardwareBaseAddr = (PVOID)((ReturnedValue->ParameterData.IntegerData) << 4);
-#else
-            Adapter->HardwareBaseAddr = (PVOID)(ReturnedValue->ParameterData.IntegerData);
-#endif
-            if (!((Adapter->HardwareBaseAddr == (PVOID)0xC0000) ||
-                  (Adapter->HardwareBaseAddr == (PVOID)0xC8000) ||
-                  (Adapter->HardwareBaseAddr == (PVOID)0xD0000) ||
-                  (Adapter->HardwareBaseAddr == (PVOID)0xD8000) ||
-                  (Adapter->HardwareBaseAddr == (PVOID)0xE0000) ||
-                  (Adapter->HardwareBaseAddr == (PVOID)0xE8000))) {
-
-                ConfigError = TRUE;
-                ConfigErrorCode = NDIS_ERROR_CODE_UNSUPPORTED_CONFIGURATION;
-
-                goto RegisterAdapter;
-
-            }
-
-        }
-
-
-        if (((ULONG)Adapter->HardwareBaseAddr) & 0x8000) {
-
-            Adapter->AmountOfHardwareMemory = 0x8000;
-            Adapter->HardwareBaseOffset = 0x8000;
-
-        } else {
-
-            Adapter->AmountOfHardwareMemory = 0x10000;
-            Adapter->HardwareBaseOffset = 0x0;
-
-        }
-
-    } else if (Adapter->LanceCard == LANCE_DEPCA) {
-
-        Adapter->InterruptNumber = LANCE_DEPCA_INTERRUPT_VECTOR;
-        Adapter->InterruptRequestLevel = LANCE_DEPCA_INTERRUPT_VECTOR;
-        Adapter->AmountOfHardwareMemory = LANCE_DEPCA_HARDWARE_MEMORY;
-        Adapter->HardwareBaseAddr = LANCE_DEPCA_BASE;
-        Adapter->IoBaseAddr = LANCE_DEPCA_NICSR_ADDRESS;
-
-    }
-
-RegisterAdapter:
-
     NdisCloseConfiguration(ConfigHandle);
+    Status = NdisMAllocateMapRegisters(
+        MiniportAdapterHandle,
+        0,
+        NDIS_DMA_24BITS,
+        1,
+        Adapter->AmountOfHardwareMemory
+        );
 
-    if (ConfigError) {
-
-        NdisWriteErrorLogEntry(
-            Adapter->MiniportAdapterHandle,
-            ConfigErrorCode,
-            0
-            );
-
+    if (Status != NDIS_STATUS_SUCCESS)
+    {
         LANCE_FREE_PHYS(Adapter, sizeof(LANCE_ADAPTER));
-
-        return(NDIS_STATUS_FAILURE);
-
+        return(Status);
     }
 
-    if (!Adapter->IsPci)
-    {
-        NdisMSetAttributes(
-            MiniportAdapterHandle,
-            (NDIS_HANDLE)Adapter,
-            FALSE,
-            NdisInterfaceIsa
-            );
-    }
-
-    if (Adapter->IsPci)
-    {
-        Status = NdisMAllocateMapRegisters(
-            MiniportAdapterHandle,
-            0,
-            NDIS_DMA_24BITS,
-            1,
-            Adapter->AmountOfHardwareMemory
-            );
-
-        if (Status != NDIS_STATUS_SUCCESS)
-        {
-            LANCE_FREE_PHYS(Adapter, sizeof(LANCE_ADAPTER));
-            return(Status);
-        }
-
-        Adapter->MapRegistersAllocated = TRUE;
-    }
+    Adapter->MapRegistersAllocated = TRUE;
 
     //
     // Register the IoPortRanges
     //
 
-    if (Adapter->IsPci) {
+    Status = NdisMRegisterIoPortRange(
+        (PVOID *)(&(Adapter->Nicsr)),
+        MiniportAdapterHandle,
+        Adapter->IoBaseAddr,
+        0x20
+        );
 
-        Status = NdisMRegisterIoPortRange(
-                     (PVOID *)(&(Adapter->Nicsr)),
-                     MiniportAdapterHandle,
-                     Adapter->IoBaseAddr,
-                     0x20
-                     );
-
-        Adapter->RAP = Adapter->Nicsr + 0x12;
-        Adapter->RDP = Adapter->Nicsr + 0x10;
-        Adapter->BDP = Adapter->Nicsr + 0x16;
-        Adapter->NetworkHardwareAddress = Adapter->Nicsr;
-
-    } else if (Adapter->LanceCard & (LANCE_DE100 | LANCE_DE201)) {
-
-        Status = NdisMRegisterIoPortRange(
-                     (PVOID *)(&(Adapter->Nicsr)),
-                     MiniportAdapterHandle,
-                     Adapter->IoBaseAddr,
-                     0x10
-                     );
-
-        Adapter->RAP = Adapter->Nicsr + LANCE_DE201_RAP_OFFSET;
-        Adapter->RDP = Adapter->Nicsr + LANCE_DE201_RDP_OFFSET;
-        Adapter->NetworkHardwareAddress = Adapter->Nicsr + LANCE_DE201_NETWORK_OFFSET;
-
-    } else if (Adapter->LanceCard == LANCE_DEPCA) {
-
-        Status = NdisMRegisterIoPortRange(
-                     (PVOID *)(&(Adapter->Nicsr)),
-                     MiniportAdapterHandle,
-                     Adapter->IoBaseAddr,
-                     0x10
-                     );
-
-        Adapter->LanceCard = LANCE_DE100;
-        Adapter->RAP = Adapter->Nicsr + LANCE_DEPCA_RAP_OFFSET;
-        Adapter->RDP = Adapter->Nicsr + LANCE_DEPCA_RDP_OFFSET;
-        Adapter->NetworkHardwareAddress = Adapter->Nicsr + LANCE_DEPCA_EPROM_OFFSET;
-
-    }
-
-#ifndef i386
-
-    else if (Adapter->LanceCard == LANCE_DECTC) {
-
-        Status = NdisMRegisterIoPortRange(
-                     (PVOID *)(&(Adapter->Nicsr)),
-                     MiniportAdapterHandle,
-                     ((ULONG)Adapter->HardwareBaseAddr) + LANCE_DECTC_REGISTER_OFFSET,
-                     LANCE_DECTC_REGISTER_MAPSIZE
-                     );
-
-        Adapter->RAP = Adapter->Nicsr + LANCE_DEPCA_RAP_OFFSET;
-        Adapter->RDP = Adapter->Nicsr + LANCE_DEPCA_RDP_OFFSET;
-        Adapter->NetworkHardwareAddress = Adapter->Nicsr + LANCE_DEPCA_EPROM_OFFSET;
-
-    }
-
-#endif
+    Adapter->RAP = Adapter->Nicsr + 0x12;
+    Adapter->RDP = Adapter->Nicsr + 0x10;
+    Adapter->BDP = Adapter->Nicsr + 0x16;
+    Adapter->NetworkHardwareAddress = Adapter->Nicsr;
 
     if (Status != NDIS_STATUS_SUCCESS) {
 
@@ -985,23 +626,13 @@ Fail1:
     // Deregister the IoPortRanges
     //
 
-    if (Adapter->IoPortsRegistered && Adapter->IsPci) {
+    if (Adapter->IoPortsRegistered) {
         NdisMDeregisterIoPortRange(
             MiniportAdapterHandle,
             Adapter->IoBaseAddr,
             0x20,
             (PVOID)(Adapter->Nicsr)
             );
-    } else if (Adapter->IoPortsRegistered &&
-               (Adapter->LanceCard & (LANCE_DE100 | LANCE_DE201))) {
-
-        NdisMDeregisterIoPortRange(
-            MiniportAdapterHandle,
-            Adapter->IoBaseAddr,
-            0x10,
-            (PVOID)(Adapter->Nicsr)
-            );
-
     }
 
     if (Adapter->MapRegistersAllocated) {
