@@ -9,7 +9,7 @@ Module Name:
 Abstract:
 
     This is the main file for the Advanced Micro Devices LANCE (Am 7990)
-    Ethernet controller.  This driver conforms to the NDIS 5.0 interface.
+    Ethernet controller.  This driver conforms to the NDIS 5.1 interface.
 
     The idea for handling loopback and sends simultaneously is largely
     adapted from the EtherLink II NDIS driver by Adam Barr.
@@ -367,6 +367,14 @@ Return Value:
     LanceChar.SetInformationHandler = LanceSetInformation;
     LanceChar.TransferDataHandler = LanceTransferData;
 
+    //
+    // NDIS 5.1 additions.  There is no SendPackets handler, so there is
+    // nothing for CancelSendPackets to cancel.
+    //
+    LanceChar.AdapterShutdownHandler = LanceShutdown;
+    LanceChar.PnPEventNotifyHandler = LancePnPEventNotify;
+    LanceChar.CancelSendPacketsHandler = NULL;
+
     Status = NdisMRegisterMiniport(
                  NdisWrapperHandle,
                  &LanceChar,
@@ -401,7 +409,7 @@ Routine Description:
 
 Arguments:
 
-    See NDIS 5.0 Miniport spec.
+    See NDIS 5.1 Miniport spec.
 
 Return Value:
 
@@ -732,6 +740,72 @@ Return Value:
     NdisFreeMemory(Adapter, sizeof(LANCE_ADAPTER), 0);
 
     return;
+}
+
+
+VOID
+LanceShutdown(
+    IN PVOID ShutdownContext
+    )
+
+/*++
+
+Routine Description:
+
+    NDIS 5.1 AdapterShutdownHandler.  Called on system shutdown or
+    restart, and possibly from the bugcheck path at high IRQL, so it only
+    touches the chip: no NDIS calls, no locks, no memory is freed.  It
+    stops the chip so that it does no more bus-master DMA into memory the
+    next OS (or the crash dump writer) is about to use.
+
+--*/
+
+{
+    PLANCE_ADAPTER Adapter = PLANCE_ADAPTER_FROM_CONTEXT_HANDLE(ShutdownContext);
+
+    if (Adapter->SurpriseRemoved) {
+        return;
+    }
+
+    NdisRawWritePortUshort(Adapter->RAP, LANCE_SELECT_CSR0);
+    NdisRawWritePortUshort(Adapter->RDP, LANCE_CSR0_STOP);
+}
+
+
+VOID
+LancePnPEventNotify(
+    IN NDIS_HANDLE MiniportAdapterContext,
+    IN NDIS_DEVICE_PNP_EVENT PnPEvent,
+    IN PVOID InformationBuffer,
+    IN ULONG InformationBufferLength
+    )
+
+/*++
+
+Routine Description:
+
+    NDIS 5.1 PnPEventNotifyHandler.  The only event that matters to this
+    driver is surprise removal: after it, the I/O ports read as all ones
+    and LanceHalt must not try to stop the chip.  The power profile
+    notification is informational only.
+
+--*/
+
+{
+    PLANCE_ADAPTER Adapter = PLANCE_ADAPTER_FROM_CONTEXT_HANDLE(MiniportAdapterContext);
+
+    UNREFERENCED_PARAMETER(InformationBuffer);
+    UNREFERENCED_PARAMETER(InformationBufferLength);
+
+    switch (PnPEvent)
+    {
+        case NdisDevicePnPEventSurpriseRemoved:
+            Adapter->SurpriseRemoved = TRUE;
+            break;
+
+        default:
+            break;
+    }
 }
 
 #pragma NDIS_PAGEABLE_FUNCTION(LancePciHardwareDetails)

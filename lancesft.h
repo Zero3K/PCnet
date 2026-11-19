@@ -33,7 +33,7 @@ Notes:
 #define _LANCESFT_
 
 #define LANCE_NDIS_MAJOR_VERSION 5
-#define LANCE_NDIS_MINOR_VERSION 0
+#define LANCE_NDIS_MINOR_VERSION 1
 
 #if DBG
 
@@ -609,6 +609,12 @@ typedef struct _LANCE_ADAPTER {
     BOOLEAN HardwareFailure;
 
     //
+    // Set by the PnP event handler when the device has been surprise
+    // removed; the hardware must not be touched after that.
+    //
+    BOOLEAN SurpriseRemoved;
+
+    //
     // Lookahead buffer for loopback packets
     //
     UCHAR Lookahead[LANCE_MAX_LOOKAHEAD + LANCE_HEADER_SIZE];
@@ -825,6 +831,19 @@ LanceEnableInterrupt(
 VOID
 LanceHalt(
     IN PVOID MiniportAdapterContext
+    );
+
+VOID
+LanceShutdown(
+    IN PVOID ShutdownContext
+    );
+
+VOID
+LancePnPEventNotify(
+    IN NDIS_HANDLE MiniportAdapterContext,
+    IN NDIS_DEVICE_PNP_EVENT PnPEvent,
+    IN PVOID InformationBuffer,
+    IN ULONG InformationBufferLength
     );
 
 VOID
