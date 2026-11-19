@@ -208,6 +208,12 @@ LanceQueryPciResources(
     IN PLANCE_ADAPTER Adapter
     );
 
+STATIC
+VOID
+LanceIdentifyChip(
+    IN PLANCE_ADAPTER Adapter
+    );
+
 VOID
 RelinquishReceivePacket(
     IN PLANCE_ADAPTER Adapter,
@@ -450,8 +456,9 @@ Return Value:
     Adapter->BeingRemoved = FALSE;
 
     //
-    // The PCI IDs in the INF bind only PCnet devices. Read the device ID
-    // here, then use NDIS-assigned resources for its port and interrupt.
+    // Every PCnet-PCI/FAST part enumerates as 1022:2000 (Am79C978 HomePNA
+    // as 1022:2001).  The chip itself is identified from CSR88/CSR89 once
+    // it has been reset, in LanceRegisterAdapter.
     //
     PciId = 0;
     if (NdisReadPciSlotInformation(
@@ -460,16 +467,11 @@ Return Value:
             0,
             &PciId,
             sizeof(PciId)) == sizeof(PciId) &&
-        (PciId & 0xffff) == 0x1022 &&
-        (((PciId >> 16) == 0x2000) ||
-         ((PciId >> 16) == 0x2001) ||
-         ((PciId >> 16) == 0x2621) ||
-         ((PciId >> 16) == 0x2623) ||
-         ((PciId >> 16) == 0x2624) ||
-         ((PciId >> 16) == 0x2625) ||
-         ((PciId >> 16) == 0x2626) ||
-         ((PciId >> 16) == 0x2627)))
+        (USHORT)(PciId & 0xffff) == PCNET_PCI_VENDOR_ID &&
+        ((USHORT)(PciId >> 16) == PCNET_PCI_DEVICE_ID ||
+         (USHORT)(PciId >> 16) == PCNET_HOME_PCI_DEVICE_ID))
     {
+        Adapter->PciDeviceId = (USHORT)(PciId >> 16);
         PciCommand = 0;
 
         if (NdisReadPciSlotInformation(
@@ -834,6 +836,63 @@ LanceQueryPciResources(
            NDIS_STATUS_ADAPTER_NOT_FOUND);
 }
 
+#pragma NDIS_PAGEABLE_FUNCTION(LanceIdentifyChip)
+
+STATIC
+VOID
+LanceIdentifyChip(
+    IN PLANCE_ADAPTER Adapter
+    )
+{
+    USHORT Low;
+    USHORT High;
+
+    LANCE_WRITE_RAP(Adapter, LANCE_SELECT_CSR88);
+    LANCE_READ_RDP(Adapter, &Low);
+    LANCE_WRITE_RAP(Adapter, LANCE_SELECT_CSR89);
+    LANCE_READ_RDP(Adapter, &High);
+    LANCE_WRITE_RAP(Adapter, LANCE_SELECT_CSR0);
+
+    Adapter->ChipId = ((ULONG)High << 16) | Low;
+    Adapter->ChipPart = PCNET_CHIP_PART(Adapter->ChipId);
+
+    switch (Adapter->ChipPart)
+    {
+        case PCNET_PART_79C970:
+        case PCNET_PART_79C970_ALT:
+            Adapter->ChipName = "Am79C970 (PCnet-PCI)";
+            break;
+        case PCNET_PART_79C970A:
+            Adapter->ChipName = "Am79C970A (PCnet-PCI II)";
+            break;
+        case PCNET_PART_79C971:
+            Adapter->ChipName = "Am79C971 (PCnet-FAST)";
+            break;
+        case PCNET_PART_79C972:
+            Adapter->ChipName = "Am79C972 (PCnet-FAST+)";
+            break;
+        case PCNET_PART_79C973:
+            Adapter->ChipName = "Am79C973 (PCnet-FAST III)";
+            break;
+        case PCNET_PART_79C975:
+            Adapter->ChipName = "Am79C975 (PCnet-FAST III)";
+            break;
+        case PCNET_PART_79C978:
+            Adapter->ChipName = "Am79C978 (PCnet-Home)";
+            break;
+        default:
+            Adapter->ChipName = "unknown PCnet";
+            break;
+    }
+
+    DbgPrint("lancepci: %s, chip ID 0x%08lx, PCI 1022:%04x, I/O 0x%lx, IRQ %u\n",
+             Adapter->ChipName,
+             Adapter->ChipId,
+             Adapter->PciDeviceId,
+             Adapter->IoBaseAddr,
+             Adapter->InterruptNumber);
+}
+
 #pragma NDIS_PAGEABLE_FUNCTION(LanceRegisterAdapter)
 
 NDIS_STATUS
@@ -1023,6 +1082,8 @@ Return Value:
         NdisStallExecution(1000);
         NdisRawWritePortUshort(Adapter->RAP, 20);
         NdisRawWritePortUshort(Adapter->BDP, 0);
+
+        LanceIdentifyChip(Adapter);
 
         LanceSyncStopChip(Adapter);
 

@@ -348,6 +348,14 @@ typedef struct _LANCE_ADAPTER {
     NDIS_PHYSICAL_ADDRESS SharedMemoryPhysicalAddress;
 
     //
+    // PCI device ID, and the chip ID read from CSR88/CSR89 after reset.
+    //
+    USHORT PciDeviceId;
+    USHORT ChipPart;
+    ULONG ChipId;
+    const char *ChipName;
+
+    //
     // Address in memory of the network address
     //
     ULONG NetworkHardwareAddress;
