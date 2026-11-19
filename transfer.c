@@ -167,8 +167,8 @@ Return Value:
     ASSERT(sizeof(ULONG_PTR) == sizeof(NDIS_HANDLE));
 
     C.WholeThing = (ULONG_PTR)MiniportReceiveContext;
-    FirstBuffer = C.INFO.FirstBuffer;
-    LastBuffer = C.INFO.LastBuffer;
+    FirstBuffer = (UINT)C.INFO.FirstBuffer;
+    LastBuffer = (UINT)C.INFO.LastBuffer;
 
     //
     // Get the first buffer of the destination.
