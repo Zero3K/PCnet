@@ -3809,69 +3809,66 @@ Return Value:
 
             LANCE_GET_MESSAGE_SIZE(CurrentEntry, PacketSize);
 
-            LookAheadSize = PacketSize;
-
             //
-            // Find amount to indicate.
+            // PacketSize is MCNT minus the 4-byte FCS.  An MCNT below 4
+            // makes it wrap to a huge UINT, a frame shorter than the
+            // Ethernet header would make LookAheadSize wrap below, and
+            // anything over 1514 bytes is not a frame we can describe to
+            // NDIS (and TransferData would read past the packet).  None
+            // of these come from a healthy chip; drop them rather than
+            // indicate garbage lengths.
             //
+            if ((PacketSize < LANCE_HEADER_SIZE) ||
+                (PacketSize > LANCE_LARGE_BUFFER_SIZE))
+            {
+                Adapter->FramingError++;
 
-            LookAheadSize = ((LookAheadSize < Adapter->SizeOfReceiveBuffer) ?
-                             LookAheadSize :
-                             Adapter->SizeOfReceiveBuffer);
+                LookaheadBuffer = NULL;
+            }
+            else
+            {
+                LookAheadSize = PacketSize;
 
-            LookAheadSize -= LANCE_HEADER_SIZE;
+                //
+                // Find amount to indicate.
+                //
 
-            //
-            // Increment the number of packets succesfully received.
-            //
+                LookAheadSize = ((LookAheadSize < Adapter->SizeOfReceiveBuffer) ?
+                                 LookAheadSize :
+                                 Adapter->SizeOfReceiveBuffer);
 
-            Adapter->Receive++;
+                LookAheadSize -= LANCE_HEADER_SIZE;
 
-            LOG(INDICATE);
+                //
+                // Increment the number of packets succesfully received.
+                //
 
-            Adapter->IndicatingMacReceiveContext = Context;
+                Adapter->Receive++;
 
-            Adapter->IndicatedAPacket = TRUE;
+                LOG(INDICATE);
 
-            NdisCreateLookaheadBufferFromSharedMemory(
-                (PVOID)(Adapter->ReceiveVAs[Adapter->CurrentReceiveIndex]),
-                LookAheadSize + LANCE_HEADER_SIZE,
-                &LookaheadBuffer
-            );
+                Adapter->IndicatingMacReceiveContext = Context;
+
+                Adapter->IndicatedAPacket = TRUE;
+
+                NdisCreateLookaheadBufferFromSharedMemory(
+                    (PVOID)(Adapter->ReceiveVAs[Adapter->CurrentReceiveIndex]),
+                    LookAheadSize + LANCE_HEADER_SIZE,
+                    &LookaheadBuffer
+                );
+            }
 
             if (LookaheadBuffer != NULL)
             {
-                if (PacketSize < LANCE_HEADER_SIZE)
-                {
-                    if (PacketSize >= ETH_LENGTH_OF_ADDRESS)
-                    {
-                        //
-                        // Runt packet
-                        //
-
-                        NdisMEthIndicateReceive(
-                            Adapter->MiniportAdapterHandle,
-                            (NDIS_HANDLE)Context.WholeThing,
-                            LookaheadBuffer,
-                            PacketSize,
-                            NULL,
-                            0,
-                            0
-                        );
-                    }
-                }
-                else
-                {
-                    NdisMEthIndicateReceive(
-                        Adapter->MiniportAdapterHandle,
-                        (NDIS_HANDLE)Context.WholeThing,
-                        LookaheadBuffer,
-                        LANCE_HEADER_SIZE,
-                        LookaheadBuffer + LANCE_HEADER_SIZE,
-                        LookAheadSize,
-                        PacketSize - LANCE_HEADER_SIZE
-                    );
-                }
+                NdisMEthIndicateReceive(
+                    Adapter->MiniportAdapterHandle,
+                    (NDIS_HANDLE)Context.WholeThing,
+                    LookaheadBuffer,
+                    LANCE_HEADER_SIZE,
+                    LookaheadBuffer + LANCE_HEADER_SIZE,
+                    LookAheadSize,
+                    PacketSize - LANCE_HEADER_SIZE
+                );
 
                 NdisDestroyLookaheadBufferFromSharedMemory(LookaheadBuffer);
             }
