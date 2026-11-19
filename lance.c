@@ -1178,7 +1178,7 @@ Return Value:
         NDIS_PHYSICAL_ADDRESS LowestAcceptableAddress =
             NDIS_PHYSICAL_ADDRESS_CONST(0, 0);
         NDIS_PHYSICAL_ADDRESS HighestAcceptableAddress =
-            NDIS_PHYSICAL_ADDRESS_CONST(0, 0x00FFFFFF);
+            NDIS_PHYSICAL_ADDRESS_CONST(0x00FFFFFF, 0);
 
         //
         // Get hold of the RAP and RDP address as well
