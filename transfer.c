@@ -189,7 +189,7 @@ Return Value:
     if (DestinationBufferCount && DestinationCurrentBuffer) {
 
         DestinationCurrentLength = 0;
-        DestinationVirtualAddress = NdisQueryBufferSafe(
+        NdisQueryBufferSafe(
                     DestinationCurrentBuffer,
                     &DestinationVirtualAddress,
                     &DestinationCurrentLength,
@@ -252,7 +252,7 @@ Return Value:
                 }
 
                 DestinationCurrentLength = 0;
-                DestinationVirtualAddress = NdisQueryBufferSafe(
+                NdisQueryBufferSafe(
                                 DestinationCurrentBuffer,
                                 &DestinationVirtualAddress,
                                 &DestinationCurrentLength,
