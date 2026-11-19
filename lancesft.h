@@ -571,9 +571,14 @@ typedef struct _LANCE_ADAPTER {
     BOOLEAN ResetInitStarted;
 
     //
-    // The type of the request that caused the adapter to reset.
+    // What the reinitialization in progress has to complete when IDON
+    // arrives.  These are separate flags rather than one "request type"
+    // because a MAC-issued reset (memory error, transmitter stopped) can
+    // start while a set-information request is still pending, and that
+    // request must still be completed.
     //
-    NDIS_REQUEST_TYPE ResetRequestType;
+    BOOLEAN SetInformationPending;  // NdisMSetInformationComplete owed
+    BOOLEAN ResetPending;           // NdisMResetComplete owed
 
     //
     // During an indication this is set to the current indications context

@@ -405,7 +405,7 @@ Return Value:
 
         }
 
-    } else if (Adapter->ResetRequestType == NdisRequestGeneric1) {
+    } else if (Adapter->ResetPending) {
 
         Status = NDIS_STATUS_RESET_IN_PROGRESS;
 

@@ -1847,7 +1847,8 @@ Return Value:
             // request on its own.  It could do that if there
             // were some sort of error.
             //
-            NDIS_REQUEST_TYPE ResetRequestType;
+            BOOLEAN CompleteSetInformation;
+            BOOLEAN CompleteReset;
 
             LOG(RESET_STEP_3);
 
@@ -1859,41 +1860,50 @@ Return Value:
             Adapter->ResetInitStarted = FALSE;
 
             //
-            // We save off the open that caused this reset incase
-            // we get *another* reset while we're indicating the
-            // last reset is done.
+            // Take a copy and clear the flags first: completing a request
+            // can lead NDIS straight back into us with another one that
+            // starts a new reset.
             //
-            ResetRequestType = Adapter->ResetRequestType;
+            CompleteSetInformation = Adapter->SetInformationPending;
+            CompleteReset = Adapter->ResetPending;
+            Adapter->SetInformationPending = FALSE;
+            Adapter->ResetPending = FALSE;
 
+            //
+            // Restart the chip before completing anything, so that a
+            // reset started from inside a completion is not undone by a
+            // late LanceStartChip.
+            //
             LanceStartChip(Adapter);
 
-            if (ResetRequestType == NdisRequestSetInformation)
+            if (CompleteSetInformation)
             {
                 //
-                // It was a request submitted by a protocol.
+                // A filter or multicast change from a protocol.  The new
+                // init block carried it, so it succeeded.
                 //
                 NdisMSetInformationComplete(
                     Adapter->MiniportAdapterHandle,
                     NDIS_STATUS_SUCCESS
                 );
             }
-            else
+
+            if (CompleteReset)
             {
-                //
-                // It was a reset command.
-                //
-                if (ResetRequestType == NdisRequestGeneric1)
-                {
-                    //
-                    // Is was a reset request
-                    //
-                    NdisMResetComplete(
-                        Adapter->MiniportAdapterHandle,
-                        NDIS_STATUS_SUCCESS,
-                        FALSE
-                    );
-                }
+                NdisMResetComplete(
+                    Adapter->MiniportAdapterHandle,
+                    NDIS_STATUS_SUCCESS,
+                    FALSE
+                );
             }
+
+            //
+            // LanceSend returned NDIS_STATUS_RESOURCES for every packet
+            // offered during the reset, and the reset dropped whatever
+            // was on the transmit ring, so no transmit interrupt is
+            // coming to restart NDIS's send queue.  Restart it here.
+            //
+            NdisMSendResourcesAvailable(Adapter->MiniportAdapterHandle);
 
             goto LoopBottom;
         }
@@ -4560,10 +4570,31 @@ Return Value:
     Adapter->ResetInitStarted = FALSE;
 
     //
-    // Shut down all of the transmit queues so that the
-    // transmit portion of the chip will eventually calm down.
+    // Record what has to be completed once the chip is reinitialized.
+    // Flags, not a single value: a MAC-issued reset (NdisRequestGeneric4)
+    // that starts while a set-information is pending must not make us
+    // forget to complete that request.
     //
-    Adapter->ResetRequestType = NdisRequestType;
+    switch (NdisRequestType)
+    {
+        case NdisRequestSetInformation:
+            Adapter->SetInformationPending = TRUE;
+            break;
+
+        case NdisRequestGeneric1:
+            //
+            // MiniportReset.  NDIS aborts a request that is still
+            // pending on a serialized miniport before it calls
+            // MiniportReset, so that request is no longer ours to
+            // complete (this matches what the original driver did).
+            //
+            Adapter->ResetPending = TRUE;
+            Adapter->SetInformationPending = FALSE;
+            break;
+
+        default:
+            break;
+    }
 
 #if LANCE_TRACE
     DbgPrint("Out SetupForReset\n");
