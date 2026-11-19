@@ -979,7 +979,7 @@ LanceIdentifyChip(
             break;
     }
 
-    DbgPrint("lancepci: %s, chip ID 0x%08lx, PCI 1022:%04x, I/O 0x%lx, IRQ %u\n",
+    DbgPrint("pcntn5m: %s, chip ID 0x%08lx, PCI 1022:%04x, I/O 0x%lx, IRQ %u\n",
              Adapter->ChipName,
              Adapter->ChipId,
              Adapter->PciDeviceId,
@@ -1034,7 +1034,7 @@ Return Value:
         return TRUE;
     }
 
-    DbgPrint("lancepci: I/O 0x%lx does not answer in 16-bit WIO mode after "
+    DbgPrint("pcntn5m: I/O 0x%lx does not answer in 16-bit WIO mode after "
              "reset (RAP readback 0x%04x, CSR0 0x%04x).  The chip may have "
              "been left in 32-bit DWIO mode by another driver; only a "
              "hardware reset (cold boot) clears that.\n",
