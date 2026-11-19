@@ -220,6 +220,12 @@ LanceConfigureChip(
     IN PLANCE_ADAPTER Adapter
     );
 
+STATIC
+BOOLEAN
+LanceCheckWioMode(
+    IN PLANCE_ADAPTER Adapter
+    );
+
 VOID
 RelinquishReceivePacket(
     IN PLANCE_ADAPTER Adapter,
@@ -905,6 +911,60 @@ LanceIdentifyChip(
              Adapter->InterruptNumber);
 }
 
+#pragma NDIS_PAGEABLE_FUNCTION(LanceCheckWioMode)
+
+STATIC
+BOOLEAN
+LanceCheckWioMode(
+    IN PLANCE_ADAPTER Adapter
+    )
+
+/*++
+
+Routine Description:
+
+    Confirms, right after the software reset, that the chip is in 16-bit
+    word I/O (WIO) mode: RDP at +0x10, RAP at +0x12, reset at +0x14 and BDP
+    at +0x16, all 16 bits wide.  This driver only ever uses WIO.
+
+    The chip leaves WIO for 32-bit DWIO as soon as anything does a 32-bit
+    write to RDP, and only a hardware reset (PCI RST#) brings it back;
+    reading the reset register does not.  A driver loaded earlier in the
+    same boot (or a boot ROM) can therefore leave the chip in DWIO, where
+    the 16-bit accesses below are undefined.
+
+    After reset the chip is stopped (CSR0 = 0x0004) and RAP is readable,
+    so both are checked.
+
+Return Value:
+
+    TRUE if the chip answers as expected in WIO mode.
+
+--*/
+
+{
+    USHORT Csr0;
+    USHORT Rap;
+
+    NdisRawWritePortUshort(Adapter->RAP, LANCE_SELECT_CSR88);
+    NdisRawReadPortUshort(Adapter->RAP, &Rap);
+
+    NdisRawWritePortUshort(Adapter->RAP, LANCE_SELECT_CSR0);
+    NdisRawReadPortUshort(Adapter->RDP, &Csr0);
+
+    if ((Rap == LANCE_SELECT_CSR88) && (Csr0 == LANCE_CSR0_STOP)) {
+        return TRUE;
+    }
+
+    DbgPrint("lancepci: I/O 0x%lx does not answer in 16-bit WIO mode after "
+             "reset (RAP readback 0x%04x, CSR0 0x%04x).  The chip may have "
+             "been left in 32-bit DWIO mode by another driver; only a "
+             "hardware reset (cold boot) clears that.\n",
+             Adapter->IoPortBase, Rap, Csr0);
+
+    return FALSE;
+}
+
 #pragma NDIS_PAGEABLE_FUNCTION(LanceConfigureChip)
 
 STATIC
@@ -1146,6 +1206,30 @@ Return Value:
 
         NdisRawReadPortUshort(Adapter->IoPortBase + 0x14, &ResetValue);
         NdisStallExecution(1000);
+
+        if (!LanceCheckWioMode(Adapter)) {
+
+            NdisWriteErrorLogEntry(
+                Adapter->MiniportAdapterHandle,
+                NDIS_ERROR_CODE_HARDWARE_FAILURE,
+                1,
+                (ULONG)Adapter->IoPortBase
+                );
+
+            NdisMFreeSharedMemory(
+                Adapter->MiniportAdapterHandle,
+                Adapter->AmountOfHardwareMemory,
+                FALSE,
+                Adapter->MmMappedBaseAddr,
+                Adapter->SharedMemoryPhysicalAddress
+                );
+            Adapter->SharedMemoryAllocated = FALSE;
+
+            DeleteAdapterMemory(Adapter);
+
+            return NDIS_STATUS_ADAPTER_NOT_FOUND;
+        }
+
         NdisRawWritePortUshort(Adapter->RAP, LANCE_SELECT_BCR20);
         NdisRawWritePortUshort(Adapter->BDP, 0);
 
