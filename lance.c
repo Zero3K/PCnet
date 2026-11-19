@@ -569,9 +569,9 @@ Return Value:
     if (Status == NDIS_STATUS_SUCCESS)
     {
         MaxMulticastList = ReturnedValue->ParameterData.IntegerData;
-        if (MaxMulticastList > 0xff)
+        if (MaxMulticastList > LANCE_MAX_MULTICAST_LIST)
         {
-            MaxMulticastList = 0xff;
+            MaxMulticastList = LANCE_MAX_MULTICAST_LIST;
         }
     }
 
@@ -2993,6 +2993,20 @@ Return Value:
                 *BytesNeeded = 0;
 
                 return( NDIS_STATUS_INVALID_LENGTH );
+
+            }
+
+            //
+            // The list is copied into a fixed table; refuse more entries
+            // than we advertise in OID_802_3_MAXIMUM_LIST_SIZE.
+            //
+
+            if ((OidLength / LANCE_LENGTH_OF_ADDRESS) > Adapter->MaxMulticastList) {
+
+                *BytesRead = 0;
+                *BytesNeeded = 0;
+
+                return( NDIS_STATUS_MULTICAST_FULL );
 
             }
 

@@ -35,6 +35,13 @@ Notes:
 #define LANCE_NDIS_MAJOR_VERSION 5
 #define LANCE_NDIS_MINOR_VERSION 1
 
+//
+// Size of the multicast address table in the adapter structure, and so
+// the most addresses OID_802_3_MULTICAST_LIST can ever accept.  The
+// MaxMulticastList registry value can lower this, not raise it.
+//
+#define LANCE_MAX_MULTICAST_LIST 32
+
 #if DBG
 
 #define LANCELOG 1
@@ -626,7 +633,7 @@ typedef struct _LANCE_ADAPTER {
 
     UINT PacketFilter;
     UINT NumberOfAddresses;
-    UCHAR MulticastAddresses[32][LANCE_LENGTH_OF_ADDRESS];
+    UCHAR MulticastAddresses[LANCE_MAX_MULTICAST_LIST][LANCE_LENGTH_OF_ADDRESS];
 
 } LANCE_ADAPTER,*PLANCE_ADAPTER;
 
