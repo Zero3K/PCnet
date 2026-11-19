@@ -4,8 +4,10 @@
 ; and Am79C978 PCnet-Home, NDIS 5.1 miniport. The chip runs in 16-bit
 ; LANCE mode (SWSTYLE 0) with 24-bit DMA.
 ;
-; Targets: Windows Server 2003 x86 and ReactOS x86.
+; Targets: Windows Server 2003 x86, Windows XP x86, Windows 7 x86 and
+; ReactOS x86 (all load NDIS 5.1 miniports).
 ; x86 only: the driver is not 64-bit clean, so there is no NTamd64 section.
+; Not for Windows 8, 10 or 11: those no longer load NDIS 5.x miniports.
 
 [Version]
 Signature   = "$Windows NT$"

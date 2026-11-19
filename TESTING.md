@@ -1,6 +1,8 @@
 # Testing lancepci.sys
 
-How to test the driver in a ReactOS x86 VM under VirtualBox. Use the same steps for Windows Server 2003 x86; only the debugger boot switch differs.
+How to test the driver in a ReactOS x86 VM under VirtualBox. Then repeat the same steps on the other supported targets: Windows Server 2003 x86, Windows XP x86 and Windows 7 x86 (see section 7). Only the install dialogs and the debugger boot switch differ.
+
+Windows 7 x64, Windows 8, Windows 10 and Windows 11 are not supported; CHANGES.md explains why.
 
 Test both emulated chips, one after the other:
 
@@ -108,3 +110,23 @@ If a test fails, keep the debug output and note the test number. A `!analyze -v`
 ## 6. Not covered by the VM
 
 VirtualBox only emulates the 79C970A and 79C973. The 79C970, 79C971 (PCnet-FAST), 79C972 (PCnet-FAST+), 79C975 and 79C978 need real cards. CHANGES.md lists what is untested.
+
+## 7. Windows XP x86 and Windows 7 x86 runs
+
+Run the full checklist in section 5 on each OS, with both adapter types (PCnet-FAST III, then PCnet-PCI II). Use a 32-bit install; the driver will not load on x64. Differences from the ReactOS run:
+
+- **In-box driver.** XP and Windows 7 ship AMD's PCnet driver and install it automatically for `PCI\VEN_1022&DEV_2000`. Replace it with Have Disk as in section 3:
+  - On XP, the dialogs are the same as on Server 2003.
+  - On Windows 7: *Update Driver Software… → Browse my computer → Let me pick from a list → Have Disk…*
+- **Unsigned driver.**
+  - XP shows a "has not passed Windows Logo testing" warning: choose *Continue Anyway*.
+  - Windows 7 x86 shows "Windows can't verify the publisher": choose *Install this driver software anyway*. 32-bit Windows 7 does not enforce kernel-mode signing, so no test-signing mode is needed.
+- **Confirm the driver.** Driver Details must show `lancepci.sys`, and `sc query lancepci` must report RUNNING. On Windows 7, also run `driverquery /v | findstr /i lancepci`.
+- **Debugger.**
+  - On XP, add `/DEBUG /DEBUGPORT=COM1 /BAUDRATE=115200` to `boot.ini`, as on Server 2003.
+  - On Windows 7, from an elevated prompt run `bcdedit /debug on` and then `bcdedit /dbgsettings serial debugport:1 baudrate:115200`.
+  - Connect WinDbg with the same pipe command as in section 4.
+  - On both, enable DbgPrint output with `ed nt!Kd_DEFAULT_Mask 0xf`. On Windows 7 you can instead set the registry value `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Debug Print Filter`, `DEFAULT` = `0xf`.
+- **Windows 7 extras.**
+  - Check that the *Network and Sharing Center* shows the connection. Since the driver does not report media state, it will never show "Network cable unplugged" (see CHANGES.md).
+  - Run test 9 (disable/enable) from the Network Connections folder as well as from Device Manager.
