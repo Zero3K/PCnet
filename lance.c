@@ -324,6 +324,7 @@ Return Value:
     NDIS_MINIPORT_CHARACTERISTICS LanceChar;
     NDIS_STRING MacName = NDIS_STRING_CONST("Lance");
 
+    DbgPrint("lancepci: DriverEntry begin\n");
     //
     // Initialize the wrapper.
     //
@@ -373,6 +374,7 @@ Return Value:
         NdisTerminateWrapper(NdisWrapperHandle, NULL);
     }
 
+    DbgPrint("lancepci: DriverEntry register status=0x%08lx\n", (ULONG)Status);
     return(Status);
 }
 
@@ -430,6 +432,8 @@ Return Value:
 
     PAGED_CODE();
 
+    DbgPrint("lancepci: initialize begin handle=%p media=%u\n",
+             MiniportAdapterHandle, MediumArraySize);
     //
     // Search for correct medium.
     //
@@ -448,6 +452,7 @@ Return Value:
 
     if (MediumArray[MediumArraySize] != NdisMedium802_3){
 
+        DbgPrint("lancepci: initialize unsupported medium\n");
         return( NDIS_STATUS_UNSUPPORTED_MEDIA );
 
     }
@@ -461,6 +466,7 @@ Return Value:
     LANCE_ALLOC_PHYS(&Adapter, sizeof(LANCE_ADAPTER));
     if (Adapter == NULL)
     {
+        DbgPrint("lancepci: initialize adapter allocation failed\n");
         NdisWriteErrorLogEntry(
             MiniportAdapterHandle,
             NDIS_ERROR_CODE_OUT_OF_RESOURCES,
@@ -488,6 +494,8 @@ Return Value:
                        0,
                        &PciId,
                        sizeof(PciId));
+    DbgPrint("lancepci: initialize adapter=%p pci=0x%08lx bytes=%u\n",
+             Adapter, PciId, PciBytesRead);
     if (PciBytesRead == sizeof(PciId) &&
         (USHORT)(PciId & 0xffff) == PCNET_PCI_VENDOR_ID &&
         ((USHORT)(PciId >> 16) == PCNET_PCI_DEVICE_ID ||
@@ -503,6 +511,8 @@ Return Value:
                 &PciCommand,
                 sizeof(PciCommand)) != sizeof(PciCommand))
         {
+            DbgPrint("lancepci: initialize adapter=%p PCI command read failed\n",
+                     Adapter);
             NdisWriteErrorLogEntry(
                 MiniportAdapterHandle,
                 NDIS_ERROR_CODE_ADAPTER_NOT_FOUND,
@@ -523,6 +533,8 @@ Return Value:
                 &PciCommand,
                 sizeof(PciCommand)) != sizeof(PciCommand))
         {
+            DbgPrint("lancepci: initialize adapter=%p PCI command write failed\n",
+                     Adapter);
             NdisWriteErrorLogEntry(
                 MiniportAdapterHandle,
                 NDIS_ERROR_CODE_ADAPTER_NOT_FOUND,
@@ -549,6 +561,9 @@ Return Value:
                                 ConfigurationHandle,
                                 Adapter
                                 );
+        DbgPrint("lancepci: initialize adapter=%p resources status=0x%08lx io=0x%lx irq=%u level=%u\n",
+                 Adapter, (ULONG)PciResourceStatus, Adapter->IoBaseAddr,
+                 Adapter->InterruptNumber, Adapter->InterruptRequestLevel);
         if (PciResourceStatus != NDIS_STATUS_SUCCESS)
         {
             NdisWriteErrorLogEntry(
@@ -564,6 +579,7 @@ Return Value:
     }
     else
     {
+        DbgPrint("lancepci: initialize adapter=%p PCI ID rejected\n", Adapter);
         NdisWriteErrorLogEntry(
             MiniportAdapterHandle,
             NDIS_ERROR_CODE_ADAPTER_NOT_FOUND,
@@ -578,6 +594,8 @@ Return Value:
     NdisOpenConfiguration(&Status, &ConfigHandle, ConfigurationHandle);
     if (Status != NDIS_STATUS_SUCCESS)
     {
+        DbgPrint("lancepci: initialize adapter=%p configuration status=0x%08lx\n",
+                 Adapter, (ULONG)Status);
         NdisWriteErrorLogEntry(
             MiniportAdapterHandle,
             NDIS_ERROR_CODE_DRIVER_FAILURE,
@@ -639,6 +657,8 @@ Return Value:
         Adapter->IoBaseAddr,
         0x20
         );
+    DbgPrint("lancepci: initialize adapter=%p register I/O status=0x%08lx\n",
+             Adapter, (ULONG)Status);
 
     Adapter->RAP = Adapter->IoPortBase + 0x12;
     Adapter->RDP = Adapter->IoPortBase + 0x10;
@@ -669,13 +689,17 @@ Return Value:
 
     Adapter->MaxMulticastList = (UCHAR)MaxMulticastList;
 
+    DbgPrint("lancepci: initialize adapter=%p register adapter begin\n", Adapter);
     Status = LanceRegisterAdapter( Adapter );
+    DbgPrint("lancepci: initialize adapter=%p register adapter status=0x%08lx\n",
+             Adapter, (ULONG)Status);
 
     if (Status != NDIS_STATUS_SUCCESS) {
 
         goto Fail1;
     }
 
+    DbgPrint("lancepci: initialize adapter=%p complete\n", Adapter);
     return Status;
 
 Fail1:
@@ -695,6 +719,7 @@ Fail1:
 
     LANCE_FREE_PHYS(Adapter, sizeof(LANCE_ADAPTER));
 
+    DbgPrint("lancepci: initialize failed status=0x%08lx\n", (ULONG)Status);
     return(Status);
 }
 
@@ -729,6 +754,11 @@ Return Value:
 
     LOG(REMOVE);
 
+    DbgPrint("lancepci: halt adapter=%p begin removed=%u reset=%u started=%u set=%u resetPending=%u tx=%lu rx=%lu rings=%u\n",
+             Adapter, (UINT)Adapter->SurpriseRemoved, (UINT)Adapter->ResetInProgress,
+             (UINT)Adapter->ResetInitStarted, (UINT)Adapter->SetInformationPending,
+             (UINT)Adapter->ResetPending, Adapter->Transmit, Adapter->Receive,
+             Adapter->NumberOfAvailableRings);
     //
     // 1. Stop the chip, synchronized with the ISR so the RAP write cannot
     //    land between the ISR's RAP save and restore on another CPU.
@@ -736,31 +766,42 @@ Return Value:
     //
     if (!Adapter->SurpriseRemoved)
     {
+        DbgPrint("lancepci: halt adapter=%p stop begin\n", Adapter);
         NdisMSynchronizeWithInterrupt(
             &Adapter->Interrupt,
             LanceSyncStopChip,
             (PVOID)Adapter
             );
+        DbgPrint("lancepci: halt adapter=%p stop complete\n", Adapter);
     }
 
     //
     // 2. Disconnect the interrupt.  This also waits for a DPC that is
     //    already queued or running.
     //
+    DbgPrint("lancepci: halt adapter=%p deregister interrupt begin\n", Adapter);
     NdisMDeregisterInterrupt(&(Adapter->Interrupt));
+    DbgPrint("lancepci: halt adapter=%p deregister interrupt complete\n", Adapter);
 
     //
     // 3. Stop deferred timer processing before freeing the adapter.
     //
     Adapter->ResetInProgress = FALSE;
     NdisMCancelTimer(&Adapter->DeferredTimer, &TimerCancelled);
+    DbgPrint("lancepci: halt adapter=%p cancel timer=%u\n", Adapter, (UINT)TimerCancelled);
     if (!TimerCancelled)
     {
+        DbgPrint("lancepci: halt adapter=%p flush DPCs begin\n", Adapter);
         KeFlushQueuedDpcs();
+        DbgPrint("lancepci: halt adapter=%p flush DPCs complete\n", Adapter);
         NdisMCancelTimer(&Adapter->DeferredTimer, &TimerCancelled);
+        DbgPrint("lancepci: halt adapter=%p cancel timer again=%u\n",
+                 Adapter, (UINT)TimerCancelled);
         if (!TimerCancelled)
         {
+            DbgPrint("lancepci: halt adapter=%p second flush DPCs begin\n", Adapter);
             KeFlushQueuedDpcs();
+            DbgPrint("lancepci: halt adapter=%p second flush DPCs complete\n", Adapter);
         }
     }
 
@@ -789,6 +830,7 @@ Return Value:
         Adapter->IoPortsRegistered = FALSE;
     }
 
+    DbgPrint("lancepci: halt adapter=%p complete\n", Adapter);
     NdisFreeMemory(Adapter, sizeof(LANCE_ADAPTER), 0);
 
     return;
@@ -849,6 +891,8 @@ Routine Description:
     UNREFERENCED_PARAMETER(InformationBuffer);
     UNREFERENCED_PARAMETER(InformationBufferLength);
 
+    DbgPrint("lancepci: PnP adapter=%p event=%u length=%lu\n",
+             Adapter, (UINT)PnPEvent, InformationBufferLength);
     switch (PnPEvent)
     {
         case NdisDevicePnPEventSurpriseRemoved:
@@ -1258,6 +1302,8 @@ Return Value:
 
         }
 
+        DbgPrint("lancepci: register adapter=%p DMA allocation begin size=%lu\n",
+                 Adapter, Adapter->AmountOfHardwareMemory);
         Adapter->MmMappedBaseAddr = NULL;
         Adapter->MmMappedBaseAddr = MmAllocateContiguousMemorySpecifyCache(
             Adapter->AmountOfHardwareMemory,
@@ -1279,6 +1325,8 @@ Return Value:
             Status = NDIS_STATUS_RESOURCES;
         }
 
+        DbgPrint("lancepci: register adapter=%p DMA allocation status=0x%08lx\n",
+                 Adapter, (ULONG)Status);
         if (Status != NDIS_STATUS_SUCCESS) {
 
             NdisWriteErrorLogEntry(
@@ -1301,8 +1349,10 @@ Return Value:
             (PUCHAR)(Adapter->CurrentMemoryFirstFree) +
             Adapter->AmountOfHardwareMemory;
 
+        DbgPrint("lancepci: register adapter=%p ring allocation begin\n", Adapter);
         if (!AllocateAdapterMemory(Adapter)) {
 
+            DbgPrint("lancepci: register adapter=%p ring allocation failed\n", Adapter);
             NdisWriteErrorLogEntry(
                 Adapter->MiniportAdapterHandle,
                 NDIS_ERROR_CODE_OUT_OF_RESOURCES,
@@ -1347,11 +1397,14 @@ Return Value:
         // directly since we don't have an Interrupt object yet.
         //
 
+        DbgPrint("lancepci: register adapter=%p hardware reset begin\n", Adapter);
         NdisRawReadPortUshort(Adapter->IoPortBase + 0x14, &ResetValue);
         NdisStallExecution(1000);
 
         if (!LanceCheckWioMode(Adapter, &RapValue, &Csr0Value)) {
 
+            DbgPrint("lancepci: register adapter=%p WIO check failed rap=0x%04x csr0=0x%04x\n",
+                     Adapter, (UINT)RapValue, (UINT)Csr0Value);
             NdisWriteErrorLogEntry(
                 Adapter->MiniportAdapterHandle,
                 NDIS_ERROR_CODE_HARDWARE_FAILURE,
@@ -1394,6 +1447,7 @@ Return Value:
         // Initialize the interrupt.
         //
 
+        DbgPrint("lancepci: register adapter=%p interrupt registration begin\n", Adapter);
         Status = NdisMRegisterInterrupt(
                      &Adapter->Interrupt,
                      Adapter->MiniportAdapterHandle,
@@ -1403,6 +1457,8 @@ Return Value:
                      TRUE,
                      NdisInterruptLevelSensitive
                      );
+        DbgPrint("lancepci: register adapter=%p interrupt registration status=0x%08lx\n",
+                 Adapter, (ULONG)Status);
 
         if (Status != NDIS_STATUS_SUCCESS){
 
@@ -1423,7 +1479,11 @@ Return Value:
             return Status;
         }
 
-        if ((Status = LanceInitialInit(Adapter)) != NDIS_STATUS_SUCCESS) {
+        DbgPrint("lancepci: register adapter=%p initial init begin\n", Adapter);
+        Status = LanceInitialInit(Adapter);
+        DbgPrint("lancepci: register adapter=%p initial init status=0x%08lx\n",
+                 Adapter, (ULONG)Status);
+        if (Status != NDIS_STATUS_SUCCESS) {
 
 
             NdisWriteErrorLogEntry(
@@ -1443,25 +1503,34 @@ Return Value:
             // be DMAing to.
             //
 
+            DbgPrint("lancepci: init failure adapter=%p stop begin\n", Adapter);
             NdisMSynchronizeWithInterrupt(
                 &Adapter->Interrupt,
                 LanceSyncStopChip,
                 (PVOID)Adapter
                 );
 
+            DbgPrint("lancepci: init failure adapter=%p deregister interrupt begin\n", Adapter);
             NdisMDeregisterInterrupt(&Adapter->Interrupt);
+            DbgPrint("lancepci: init failure adapter=%p deregister interrupt complete\n", Adapter);
 
             {
                 BOOLEAN TimerCancelled;
                 Adapter->ResetInProgress = FALSE;
                 NdisMCancelTimer(&Adapter->DeferredTimer, &TimerCancelled);
+                DbgPrint("lancepci: init failure adapter=%p cancel timer=%u\n",
+                         Adapter, (UINT)TimerCancelled);
                 if (!TimerCancelled)
                 {
+                    DbgPrint("lancepci: init failure adapter=%p flush DPCs begin\n", Adapter);
                     KeFlushQueuedDpcs();
+                    DbgPrint("lancepci: init failure adapter=%p flush DPCs complete\n", Adapter);
                     NdisMCancelTimer(&Adapter->DeferredTimer, &TimerCancelled);
                     if (!TimerCancelled)
                     {
+                        DbgPrint("lancepci: init failure adapter=%p second flush DPCs begin\n", Adapter);
                         KeFlushQueuedDpcs();
+                        DbgPrint("lancepci: init failure adapter=%p second flush DPCs complete\n", Adapter);
                     }
                 }
             }
@@ -1477,6 +1546,7 @@ Return Value:
 
     } else {
 
+        DbgPrint("lancepci: register adapter=%p invalid hardware address\n", Adapter);
         NdisWriteErrorLogEntry(
             Adapter->MiniportAdapterHandle,
             NDIS_ERROR_CODE_ADAPTER_NOT_FOUND,
@@ -1528,6 +1598,7 @@ Return Value:
 
     SetInitBlockAndInit(Adapter);
 
+    DbgPrint("lancepci: initial init adapter=%p waiting for IDON\n", Adapter);
     //
     // LanceIsr clears FirstInitialization when it sees IDON.  Initializing
     // takes microseconds; give up after about half a second.
@@ -1545,6 +1616,7 @@ Return Value:
     //
     if (!Adapter->FirstInitialization)
     {
+        DbgPrint("lancepci: initial init adapter=%p IDON after %u polls\n", Adapter, i);
         //
         // We can start the chip.  We may not
         // have any bindings to indicateto but this
@@ -1555,6 +1627,7 @@ Return Value:
     }
     else
     {
+        DbgPrint("lancepci: initial init adapter=%p IDON timeout after %u polls\n", Adapter, i);
         return(NDIS_STATUS_FAILURE);
     }
 

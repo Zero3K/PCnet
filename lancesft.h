@@ -42,6 +42,16 @@ Notes:
 //
 #define LANCE_MAX_MULTICAST_LIST 32
 
+static __inline BOOLEAN
+LanceTraceSample(
+    IN volatile LONG *Counter
+    )
+{
+    ULONG Count = (ULONG)InterlockedIncrement(Counter);
+    return (BOOLEAN)(Count != 0 &&
+                     (Count <= 8 || (Count & (Count - 1)) == 0));
+}
+
 #if DBG
 
 #define LANCELOG 1
@@ -561,6 +571,13 @@ typedef struct _LANCE_ADAPTER {
 
     ULONG Transmit;
     ULONG Receive;
+
+    LONG TraceQueries;
+    LONG TraceSends;
+    LONG TraceSendBlocked;
+    LONG TraceReceives;
+    LONG TraceTransmitCompletions;
+    LONG TraceReceiveErrors;
 
     //
     // Flag that when enabled lets routines know that a reset
