@@ -3789,32 +3789,29 @@ Return Value:
         if (NumberOfBuffers > (TopReceiveIndex + 1))
         {
             //
-            // Error!  For some reason we wrapped without ever seeing
-            // the end of packet.  The card is hosed.  Stop the
-            // whole process.
+            // Error!  We went all the way round the receive ring
+            // without seeing the end of a packet, so the ring is
+            // inconsistent.  Stop the chip and reinitialize it; the
+            // reset path rebuilds both rings from scratch.
             //
-
+            // (This used to call NdisMDeregisterInterrupt, which must
+            // not be called at DISPATCH_LEVEL from our own DPC and
+            // which LanceHalt would then have called a second time.)
             //
-            // There are opens to notify
-            //
-            Adapter->HardwareFailure = TRUE;
-
-            NdisMIndicateStatus(
-                Adapter->MiniportAdapterHandle,
-                NDIS_STATUS_CLOSING,
-                NULL,
-                0
-            );
-
-            NdisMIndicateStatusComplete(Adapter->MiniportAdapterHandle);
-
-            NdisMDeregisterInterrupt(&(Adapter->Interrupt));
-
             NdisWriteErrorLogEntry(
                 Adapter->MiniportAdapterHandle,
                 NDIS_ERROR_CODE_HARDWARE_FAILURE,
-                0
+                1,
+                (ULONG)0x2
             );
+
+            if (!Adapter->ResetInProgress)
+            {
+                SetupForReset(
+                    Adapter,
+                    NdisRequestGeneric4 // Means MAC issued
+                );
+            }
 
             return(TRUE);
         }
