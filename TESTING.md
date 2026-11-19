@@ -1,4 +1,4 @@
-# Testing lancepci.sys
+# Testing pcntn5m.sys
 
 How to test the driver in a ReactOS x86 VM under VirtualBox. Then repeat the same steps on the other supported targets: Windows Server 2003 x86, Windows XP x86 and Windows 7 x86 (see section 7). Only the install dialogs and the debugger boot switch differ.
 
@@ -15,10 +15,10 @@ Test both emulated chips, one after the other:
 
 From `dist\` in the repository (built by `build -cZ`, gitignored):
 
-- `lancepci.sys`: the driver, file version 1.0.0.0
-- `lancepci.inf`: the INF, CRLF line endings
+- `pcntn5m.sys`: the driver, file version 1.0.0.0
+- `pcntn5m.inf`: the INF, CRLF line endings
 
-Copy both into the same folder in the guest. The simplest way is to put them on a small ISO image (any ISO tool works, e.g. `oscdimg -n dist lancepci.iso`) and attach it as a CD in the VM settings. A VirtualBox shared folder also works if Guest Additions are installed.
+Copy both into the same folder in the guest. The simplest way is to put them on a small ISO image (any ISO tool works, e.g. `oscdimg -n dist pcntn5m.iso`) and attach it as a CD in the VM settings. A VirtualBox shared folder also works if Guest Additions are installed.
 
 ## 2. VM setup
 
@@ -38,22 +38,22 @@ ReactOS ships its own `pcnet.sys` for `PCI\VEN_1022&DEV_2000`. Windows Server 20
 
 1. Open Device Manager: *Start → Run → `devmgmt.msc`*.
 2. *Network adapters* → the AMD PCnet adapter → *Properties → Driver → Update Driver…*
-3. Choose *Install from a list or specific location* → *Don't search. I will choose the driver to install* → **Have Disk…** → browse to the folder with `lancepci.inf`.
-4. Pick **AMD PCnet-PCI/FAST Ethernet Adapter (lancepci)** and finish. The driver is unsigned, so accept the warning on Server 2003.
+3. Choose *Install from a list or specific location* → *Don't search. I will choose the driver to install* → **Have Disk…** → browse to the folder with `pcntn5m.inf`.
+4. Pick the AMD PCnet family adapter matching the hardware and finish. The driver is unsigned, so accept the warning on Server 2003.
 5. Reboot if asked.
 
-Confirm the adapter is running on **lancepci.sys**, not the in-box driver:
+Confirm the adapter is running on **pcntn5m.sys**, not the in-box driver:
 
-- Device Manager → adapter → *Properties → Driver → Driver Details* must list `…\system32\drivers\lancepci.sys`. The adapter name ends in "(lancepci)".
+- Device Manager → adapter → *Properties → Driver → Driver Details* must list `…\system32\drivers\pcntn5m.sys`. The adapter name identifies the supported PCnet model.
 - *Properties → General* shows "This device is working properly".
-- At a command prompt, `sc query lancepci` shows `STATE: 4 RUNNING`.
+- At a command prompt, `sc query pcntn5m` shows `STATE: 4 RUNNING`.
 - In the debug output (section 4) at load time:
 
   ```
-  lancepci: Am79C973 (PCnet-FAST III), chip ID 0x........, PCI 1022:2000, I/O 0x...., IRQ ..
+  pcntn5m: Am79C973 (PCnet-FAST III), chip ID 0x........, PCI 1022:2000, I/O 0x...., IRQ ..
   ```
 
-  If instead you see `lancepci: I/O 0x.... does not answer in 16-bit WIO mode after reset`, something left the chip in 32-bit DWIO mode. That usually means another PCnet driver ran earlier in this boot. Power the VM off and on (a full power cycle, not a restart) and try again.
+  If instead you see `pcntn5m: I/O 0x.... does not answer in 16-bit WIO mode after reset`, something left the chip in 32-bit DWIO mode. That usually means another PCnet driver ran earlier in this boot. Power the VM off and on (a full power cycle, not a restart) and try again.
 
 ## 4. Kernel debugging over the serial pipe
 
@@ -69,16 +69,16 @@ C:\WinDDK\7600.16385.1\Debuggers\windbg.exe -k com:pipe,port=\\.\pipe\reactos,re
 
 Useful commands once connected:
 
-- `ed nt!Kd_DEFAULT_Mask 0xf`: Server 2003 filters DbgPrint output by default; this shows the `lancepci:` lines.
+- `ed nt!Kd_DEFAULT_Mask 0xf`: Server 2003 filters DbgPrint output by default; this shows the `pcntn5m:` lines.
 - `!ndiskd.miniports`, then `!ndiskd.miniport <addr>`: on Server 2003 only. ReactOS's NDIS does not support the ndiskd extension.
-- `lm m lancepci`: confirms the module is loaded and shows its base address.
-- `bp lancepci!LanceIsr` / `bp lancepci!LanceHandleInterrupt`: if no traffic flows, these show whether interrupts arrive at all. Clear them afterwards; they fire on every packet.
+- `lm m pcntn5m`: confirms the module is loaded and shows its base address.
+- `bp pcntn5m!LanceIsr` / `bp pcntn5m!LanceHandleInterrupt`: if no traffic flows, these show whether interrupts arrive at all. Clear them afterwards; they fire on every packet.
 
-Symbols: `objfre_wnet_x86\i386\lancepci.pdb`. Use `.sympath+ C:\tasks\PCnet\objfre_wnet_x86\i386` and then `.reload /f lancepci.sys`.
+Symbols: `objfre_wnet_x86\i386\pcntn5m.pdb`. Use `.sympath+ C:\tasks\PCnet\objfre_wnet_x86\i386` and then `.reload /f pcntn5m.sys`.
 
 ### ReactOS with its built-in KDBG (the default for release and nightly builds)
 
-Standard ReactOS builds use KDBG rather than the WinDbg protocol, so WinDbg will not connect. ReactOS still writes all DbgPrint output (including the `lancepci:` lines) to COM1 when booted with the *ReactOS (Debug)* boot menu entry.
+Standard ReactOS builds use KDBG rather than the WinDbg protocol, so WinDbg will not connect. ReactOS still writes all DbgPrint output (including the `pcntn5m:` lines) to COM1 when booted with the *ReactOS (Debug)* boot menu entry.
 
 To read it, either:
 - set the serial port mode to **Raw File**, which writes everything to a log file on the host, or
@@ -92,7 +92,7 @@ Run every item on both adapter types. Write down the result and anything odd in 
 
 | # | Test | How | Pass when |
 |---|---|---|---|
-| 1 | Driver loads | Boot after install | Chip ID line in debug output; Device Manager shows no error; `sc query lancepci` reports RUNNING |
+| 1 | Driver loads | Boot after install | Chip ID line in debug output; Device Manager shows no error; `sc query pcntn5m` reports RUNNING |
 | 2 | Link up | `ipconfig /all` | Adapter listed with the VM's MAC address (VirtualBox shows it under Adapter 1 → Advanced) |
 | 3 | DHCP | `ipconfig /release`, then `ipconfig /renew` | Gets 10.0.2.15 from the NAT DHCP server |
 | 4 | Ping | `ping 10.0.2.2`, then `ping -n 100 -l 1472 10.0.2.2` | 0% loss. The 1472-byte payload gives a full 1514-byte frame |
@@ -121,7 +121,7 @@ Run the full checklist in section 5 on each OS, with both adapter types (PCnet-F
 - **Unsigned driver.**
   - XP shows a "has not passed Windows Logo testing" warning: choose *Continue Anyway*.
   - Windows 7 x86 shows "Windows can't verify the publisher": choose *Install this driver software anyway*. 32-bit Windows 7 does not enforce kernel-mode signing, so no test-signing mode is needed.
-- **Confirm the driver.** Driver Details must show `lancepci.sys`, and `sc query lancepci` must report RUNNING. On Windows 7, also run `driverquery /v | findstr /i lancepci`.
+- **Confirm the driver.** Driver Details must show `pcntn5m.sys`, and `sc query pcntn5m` must report RUNNING. On Windows 7, also run `driverquery /v | findstr /i pcntn5m`.
 - **Debugger.**
   - On XP, add `/DEBUG /DEBUGPORT=COM1 /BAUDRATE=115200` to `boot.ini`, as on Server 2003.
   - On Windows 7, from an elevated prompt run `bcdedit /debug on` and then `bcdedit /dbgsettings serial debugport:1 baudrate:115200`.
