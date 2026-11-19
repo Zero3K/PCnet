@@ -86,6 +86,29 @@ To read it, either:
 
 On a crash, KDBG drops to its own prompt on the serial port; `bt` shows the stack.
 
+### Capturing installation, DHCP and teardown hangs in WinDbg
+
+The `lancepci:` diagnostics are included in both free and checked builds;
+no source define is needed. On Windows 7, `DbgPrint` messages can still be
+filtered by the OS. Connect before reproducing the problem, break into WinDbg,
+and run:
+
+```
+.logopen /t C:\pcnet-windbg.log
+ed nt!Kd_DEFAULT_Mask 0xf
+g
+```
+
+The log path is on the debugger host. Reproduce the problem (install, disable,
+enable, uninstall, `ipconfig /release` or `ipconfig /renew`), then break in
+and run `.logclose`. Save the full log, including the last `lancepci:` line
+before the hang. The messages cover initialization and teardown stages, OID
+sets, reset/IDON completions, and sampled send, transmit-completion, receive
+and interrupt activity. Hot-path messages log the first eight occurrences and
+then powers of two per adapter/category to limit debugger traffic; they do not
+include packet contents. A missing line alone is not proof of a stuck path:
+the debugger may attach too late or messages may be filtered or lost.
+
 ## 5. Test checklist
 
 Run every item on both adapter types. Write down the result and anything odd in the debug output.

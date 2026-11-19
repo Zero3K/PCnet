@@ -557,6 +557,7 @@ Return Value:
             NdisInterfacePci
             );
 
+        DbgPrint("lancepci: initialize adapter=%p query resources begin\n", Adapter);
         PciResourceStatus = LanceQueryPciResources(
                                 ConfigurationHandle,
                                 Adapter
@@ -1950,6 +1951,14 @@ Return Value:
         );
         Csr = (USHORT)((Csr & ~LANCE_CSR0_TRANSMITTER_ON) | InterruptStatus.Csr);
 
+        if ((InterruptStatus.Csr & LANCE_CSR0_CLEAR_INTERRUPT_BITS) &&
+            LanceTraceSample(&Adapter->TraceInterrupts))
+        {
+            DbgPrint("lancepci: DPC adapter=%p csr=0x%04x reset=%u started=%u rings=%u tx=%lu rx=%lu\n",
+                     Adapter, (UINT)InterruptStatus.Csr, (UINT)Adapter->ResetInProgress,
+                     (UINT)Adapter->ResetInitStarted, Adapter->NumberOfAvailableRings,
+                     Adapter->Transmit, Adapter->Receive);
+        }
         //
         // Check the interrupt source and other reasons
         // for processing.  If there are no reasons to
@@ -2009,6 +2018,9 @@ Return Value:
             Adapter->SetInformationPending = FALSE;
             Adapter->ResetPending = FALSE;
 
+            DbgPrint("lancepci: reset adapter=%p IDON csr=0x%04x completeSet=%u completeReset=%u tx=%lu rx=%lu\n",
+                     Adapter, (UINT)InterruptStatus.Csr, (UINT)CompleteSetInformation,
+                     (UINT)CompleteReset, Adapter->Transmit, Adapter->Receive);
             //
             // Restart the chip before completing anything, so that a
             // reset started from inside a completion is not undone by a
@@ -2022,19 +2034,23 @@ Return Value:
                 // A filter or multicast change from a protocol.  The new
                 // init block carried it, so it succeeded.
                 //
+                DbgPrint("lancepci: reset adapter=%p set completion begin\n", Adapter);
                 NdisMSetInformationComplete(
                     Adapter->MiniportAdapterHandle,
                     NDIS_STATUS_SUCCESS
                 );
+                DbgPrint("lancepci: reset adapter=%p set completion returned\n", Adapter);
             }
 
             if (CompleteReset)
             {
+                DbgPrint("lancepci: reset adapter=%p reset completion begin\n", Adapter);
                 NdisMResetComplete(
                     Adapter->MiniportAdapterHandle,
                     NDIS_STATUS_SUCCESS,
                     FALSE
                 );
+                DbgPrint("lancepci: reset adapter=%p reset completion returned\n", Adapter);
             }
 
             //
@@ -2043,6 +2059,7 @@ Return Value:
             // was on the transmit ring, so no transmit interrupt is
             // coming to restart NDIS's send queue.  Restart it here.
             //
+            DbgPrint("lancepci: reset adapter=%p send resources available\n", Adapter);
             NdisMSendResourcesAvailable(Adapter->MiniportAdapterHandle);
 
             goto LoopBottom;
@@ -2061,9 +2078,13 @@ Return Value:
 #if LANCE_TRACE
             DbgPrint("Starting Initialization.\n");
 #endif
+            DbgPrint("lancepci: reset adapter=%p reinitialize begin csr=0x%04x setPending=%u resetPending=%u\n",
+                     Adapter, (UINT)Csr, (UINT)Adapter->SetInformationPending,
+                     (UINT)Adapter->ResetPending);
             StartAdapterReset(Adapter);
 
             Adapter->ResetInitStarted = TRUE;
+            DbgPrint("lancepci: reset adapter=%p reinitialize issued; waiting for IDON\n", Adapter);
             goto LoopBottom;
         }
 
@@ -2075,6 +2096,11 @@ Return Value:
                    LANCE_CSR0_BABBLE)
         )
         {
+            if (LanceTraceSample(&Adapter->TraceHardwareErrors))
+            {
+                DbgPrint("lancepci: interrupt adapter=%p error csr=0x%04x tx=%lu rx=%lu\n",
+                         Adapter, (UINT)Csr, Adapter->Transmit, Adapter->Receive);
+            }
             if (Csr & LANCE_CSR0_MISSED_PACKET)
             {
                 Adapter->MissedPacket++;
@@ -2141,6 +2167,11 @@ Return Value:
             //
             if (!(Csr & LANCE_CSR0_TRANSMITTER_ON))
             {
+                if (LanceTraceSample(&Adapter->TraceHardwareErrors))
+                {
+                    DbgPrint("lancepci: interrupt adapter=%p transmitter stopped csr=0x%04x\n",
+                             Adapter, (UINT)Csr);
+                }
                 //
                 // Might as well turn off the transmitter interrupt
                 // source since we won't ever be processing them
@@ -2772,6 +2803,13 @@ Return Value:
     ULONG MoveBytes;
 
     NDIS_HARDWARE_STATUS HardwareStatus = NdisHardwareStatusReady;
+    BOOLEAN TraceQuery = LanceTraceSample(&Adapter->TraceQueries);
+
+    if (TraceQuery)
+    {
+        DbgPrint("lancepci: query adapter=%p oid=0x%08lx length=%lu begin reset=%u\n",
+                 Adapter, (ULONG)Oid, BytesLeft, (UINT)Adapter->ResetInProgress);
+    }
 
     //
     // Make sure that ulong is 4 bytes.  Else GenericULong must change
@@ -3051,6 +3089,11 @@ Return Value:
     DbgPrint("Out LanceQueryInfo\n");
 #endif
 
+    if (TraceQuery)
+    {
+        DbgPrint("lancepci: query adapter=%p oid=0x%08lx status=0x%08lx\n",
+                 Adapter, (ULONG)Oid, (ULONG)StatusToReturn);
+    }
     LANCE_DO_DEFERRED(Adapter);
 
     return StatusToReturn;
@@ -3120,6 +3163,9 @@ Return Value:
 
     NDIS_STATUS Status;
 
+    DbgPrint("lancepci: set adapter=%p oid=0x%08lx length=%lu begin reset=%u started=%u\n",
+             Adapter, (ULONG)Oid, InformationBufferLength,
+             (UINT)Adapter->ResetInProgress, (UINT)Adapter->ResetInitStarted);
 #if LANCE_TRACE
     DbgPrint("In LanceSetInfo\n");
 #endif
@@ -3145,6 +3191,8 @@ Return Value:
                 *BytesRead = 0;
                 *BytesNeeded = 0;
 
+                DbgPrint("lancepci: set adapter=%p oid=0x%08lx invalid multicast length=%u\n",
+                         Adapter, (ULONG)Oid, OidLength);
                 return( NDIS_STATUS_INVALID_LENGTH );
 
             }
@@ -3159,6 +3207,8 @@ Return Value:
                 *BytesRead = 0;
                 *BytesNeeded = 0;
 
+                DbgPrint("lancepci: set adapter=%p oid=0x%08lx multicast list too large count=%u\n",
+                         Adapter, (ULONG)Oid, OidLength / LANCE_LENGTH_OF_ADDRESS);
                 return( NDIS_STATUS_MULTICAST_FULL );
 
             }
@@ -3192,6 +3242,8 @@ Return Value:
 
 
             LANCE_MOVE_MEMORY(&Filter, InfoBuffer, 4);
+            DbgPrint("lancepci: set adapter=%p packet filter=0x%08lx\n",
+                     Adapter, Filter);
 
             //
             // Verify bits
@@ -3272,6 +3324,9 @@ Return Value:
     DbgPrint("Out LanceSetInfo\n");
 #endif
 
+    DbgPrint("lancepci: set adapter=%p oid=0x%08lx status=0x%08lx setPending=%u reset=%u\n",
+             Adapter, (ULONG)Oid, (ULONG)Status, (UINT)Adapter->SetInformationPending,
+             (UINT)Adapter->ResetInProgress);
     LANCE_DO_DEFERRED(Adapter);
 
     return Status;
@@ -3521,6 +3576,9 @@ Return Value:
     //
     PLANCE_ADAPTER Adapter = (PLANCE_ADAPTER)MiniportAdapterContext;
 
+    DbgPrint("lancepci: reset adapter=%p requested inProgress=%u setPending=%u resetPending=%u\n",
+             Adapter, (UINT)Adapter->ResetInProgress, (UINT)Adapter->SetInformationPending,
+             (UINT)Adapter->ResetPending);
     SetupForReset(
         Adapter,
         NdisRequestGeneric1 // Means Reset
@@ -3528,6 +3586,7 @@ Return Value:
 
     LANCE_DO_DEFERRED(Adapter);
 
+    DbgPrint("lancepci: reset adapter=%p returning pending\n", Adapter);
     return(NDIS_STATUS_PENDING);
 }
 
@@ -3890,6 +3949,11 @@ Return Value:
         }
         else if (ReceiveSummaryBits & LANCE_RECEIVE_ERROR_SUMMARY)
         {
+            if (LanceTraceSample(&Adapter->TraceReceiveErrors))
+            {
+                DbgPrint("lancepci: receive adapter=%p error index=%u flags=0x%02x\n",
+                         Adapter, CurrentIndex, (UINT)ReceiveSummaryBits);
+            }
             //
             // We have an error in the packet.  Record
             // the details of the error.
@@ -3974,6 +4038,11 @@ Return Value:
             if ((PacketSize < LANCE_HEADER_SIZE) ||
                 (PacketSize > LANCE_LARGE_BUFFER_SIZE))
             {
+                if (LanceTraceSample(&Adapter->TraceReceiveErrors))
+                {
+                    DbgPrint("lancepci: receive adapter=%p invalid length=%u index=%u flags=0x%02x\n",
+                             Adapter, PacketSize, CurrentIndex, (UINT)ReceiveSummaryBits);
+                }
                 Adapter->FramingError++;
 
                 LookaheadBuffer = NULL;
@@ -3998,6 +4067,12 @@ Return Value:
 
                 Adapter->Receive++;
 
+                if (LanceTraceSample(&Adapter->TraceReceives))
+                {
+                    DbgPrint("lancepci: receive adapter=%p length=%u first=%u last=%u count=%lu\n",
+                             Adapter, PacketSize, Adapter->CurrentReceiveIndex,
+                             CurrentIndex, Adapter->Receive);
+                }
                 LOG(INDICATE);
 
                 Adapter->IndicatingMacReceiveContext = Context;
@@ -4067,6 +4142,8 @@ Return Value:
 
         if (NumberOfBuffers > (TopReceiveIndex + 1))
         {
+            DbgPrint("lancepci: receive adapter=%p ring inconsistent first=%u index=%u buffers=%u\n",
+                     Adapter, Adapter->CurrentReceiveIndex, CurrentIndex, NumberOfBuffers);
             //
             // Error!  We went all the way round the receive ring
             // without seeing the end of a packet, so the ring is
@@ -4280,6 +4357,11 @@ Return Value:
 
     if (OwningPacket == NULL)
     {
+        if (LanceTraceSample(&Adapter->TraceHardwareErrors))
+        {
+            DbgPrint("lancepci: transmit adapter=%p ring=%u missing packet available=%u\n",
+                     Adapter, FirstIndex, Adapter->NumberOfAvailableRings);
+        }
         //
         // We seem to be in a messed up state.  Ignore this interrupt and
         // the wake up dpc will reset the card if necessary.
@@ -4358,6 +4440,11 @@ Return Value:
                 !(ErrorSummaryInfo & LANCE_TRANSMIT_LATE_COLLISION)
             )
             {
+                if (LanceTraceSample(&Adapter->TraceHardwareErrors))
+                {
+                    DbgPrint("lancepci: transmit adapter=%p ring=%u flags=0x%02x error=0x%04x\n",
+                             Adapter, FirstIndex, (UINT)TransmitSummaryBits, (UINT)ErrorSummaryInfo);
+                }
                 if (ErrorSummaryInfo & LANCE_TRANSMIT_RETRY)
                 {
                     Adapter->RetryFailure++;
@@ -4468,6 +4555,12 @@ Return Value:
             Adapter->Transmit++;
         }
 
+        if (LanceTraceSample(&Adapter->TraceTransmitCompletions))
+        {
+            DbgPrint("lancepci: transmit adapter=%p complete ring=%u success=%u available=%u tx=%lu rx=%lu\n",
+                     Adapter, FirstIndex, (UINT)Successful, Adapter->NumberOfAvailableRings,
+                     Adapter->Transmit, Adapter->Receive);
+        }
         NdisMSendResourcesAvailable(Adapter->MiniportAdapterHandle);
 
         return(TRUE);
@@ -4714,6 +4807,9 @@ Return Value:
 
     LOG(RESET_STEP_1);
 
+    DbgPrint("lancepci: reset adapter=%p setup reason=%u stop begin inProgress=%u setPending=%u resetPending=%u\n",
+             Adapter, (UINT)NdisRequestType, (UINT)Adapter->ResetInProgress,
+             (UINT)Adapter->SetInformationPending, (UINT)Adapter->ResetPending);
     //
     // Shut down the chip.  We won't be doing any more work until
     // the reset is complete.
@@ -4723,6 +4819,7 @@ Return Value:
         LanceSyncStopChip,
         (PVOID)Adapter
     );
+    DbgPrint("lancepci: reset adapter=%p stop complete\n", Adapter);
 
     //
     // Once the chip is stopped we can't get any more interrupts.
@@ -4760,6 +4857,8 @@ Return Value:
             break;
     }
 
+    DbgPrint("lancepci: reset adapter=%p setup complete setPending=%u resetPending=%u\n",
+             Adapter, (UINT)Adapter->SetInformationPending, (UINT)Adapter->ResetPending);
 #if LANCE_TRACE
     DbgPrint("Out SetupForReset\n");
 #endif

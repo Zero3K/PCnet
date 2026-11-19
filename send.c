@@ -182,6 +182,10 @@ Return Value:
 
     if (Adapter->HardwareFailure) {
 
+        if (LanceTraceSample(&Adapter->TraceSendBlocked))
+        {
+            DbgPrint("lancepci: send adapter=%p failed hardware failure\n", Adapter);
+        }
         return(NDIS_STATUS_FAILURE);
 
     }
@@ -192,6 +196,11 @@ Return Value:
 
         if (Adapter->NumberOfAvailableRings == 0) {
 
+            if (LanceTraceSample(&Adapter->TraceSendBlocked))
+            {
+                DbgPrint("lancepci: send adapter=%p blocked no transmit rings tx=%lu rx=%lu\n",
+                         Adapter, Adapter->Transmit, Adapter->Receive);
+            }
             return(NDIS_STATUS_RESOURCES);
 
         }
@@ -212,6 +221,11 @@ Return Value:
         if ((!TotalVirtualLength) ||
             (TotalVirtualLength > LANCE_LARGE_BUFFER_SIZE)) {
 
+            if (LanceTraceSample(&Adapter->TraceSendBlocked))
+            {
+                DbgPrint("lancepci: send adapter=%p invalid length=%lu\n",
+                         Adapter, TotalVirtualLength);
+            }
             //
             // This packet can never be sent.  FAILURE completes it;
             // RESOURCES would make NDIS hold it at the head of the send
@@ -260,6 +274,11 @@ Return Value:
 
             if (LanceBuffersIndex == -1) {
 
+                if (LanceTraceSample(&Adapter->TraceSendBlocked))
+                {
+                    DbgPrint("lancepci: send adapter=%p blocked no buffer length=%lu rings=%u\n",
+                             Adapter, TotalVirtualLength, Adapter->NumberOfAvailableRings);
+                }
                 //
                 // Nothing available for the packet.
                 //
@@ -319,6 +338,11 @@ Return Value:
                     Adapter->LanceBufferListHeads[i] = LanceBuffersIndex;
                     Adapter->AllocateableRing = CurrentRingElement;
                     Adapter->NumberOfAvailableRings++;
+                    if (LanceTraceSample(&Adapter->TraceSendBlocked))
+                    {
+                        DbgPrint("lancepci: send adapter=%p blocked buffer mapping length=%u\n",
+                                 Adapter, SourceLength);
+                    }
                     return NDIS_STATUS_RESOURCES;
                 }
 
@@ -423,12 +447,22 @@ Return Value:
 
             PROD_TRANSMIT(Adapter);
 
+            if (LanceTraceSample(&Adapter->TraceSends))
+            {
+                DbgPrint("lancepci: send adapter=%p queued length=%lu ring=%u available=%u completed=%lu\n",
+                         Adapter, TotalVirtualLength, RingIndex,
+                         Adapter->NumberOfAvailableRings, Adapter->Transmit);
+            }
             Status = NDIS_STATUS_SUCCESS;
 
         }
 
     } else if (Adapter->ResetPending) {
 
+        if (LanceTraceSample(&Adapter->TraceSendBlocked))
+        {
+            DbgPrint("lancepci: send adapter=%p blocked reset pending\n", Adapter);
+        }
         Status = NDIS_STATUS_RESET_IN_PROGRESS;
 
     } else {
@@ -436,6 +470,12 @@ Return Value:
         //
         // Have the upper layer try again later
         //
+        if (LanceTraceSample(&Adapter->TraceSendBlocked))
+        {
+            DbgPrint("lancepci: send adapter=%p blocked reset in progress started=%u setPending=%u\n",
+                     Adapter, (UINT)Adapter->ResetInitStarted,
+                     (UINT)Adapter->SetInformationPending);
+        }
         Status = NDIS_STATUS_RESOURCES;
 
     }

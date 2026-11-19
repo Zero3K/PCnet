@@ -578,6 +578,8 @@ typedef struct _LANCE_ADAPTER {
     LONG TraceReceives;
     LONG TraceTransmitCompletions;
     LONG TraceReceiveErrors;
+    LONG TraceHardwareErrors;
+    LONG TraceInterrupts;
 
     //
     // Flag that when enabled lets routines know that a reset
