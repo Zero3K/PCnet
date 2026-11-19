@@ -7,7 +7,9 @@ This branch sits on top of `master` as of `c723dfb` (merge of #17), so it keeps 
 - **Low contiguous DMA pool** (#15). The pool is allocated with `MmAllocateContiguousMemorySpecifyCache` below 16 MB, which fixed the Windows 7 "conflict in resources" error. The fixes below free it with `MmFreeContiguousMemory` to match.
 - **Interrupt causes kept for the DPC** (#17). The ISR acknowledges CSR0 and saves the causes; the DPC collects them under `NdisMSynchronizeWithInterrupt`. Fix 5 below keeps this design and closes the remaining gaps.
 
-**Windows 7 DHCP failure** ("unidentified network", 169.254.x.x address): fix 12 is the likely cause. After a packet-filter or multicast change, the driver never told NDIS to resume sending, so the DHCP request never went out. Windows 7 makes several of those changes as the interface comes up; Server 2003 does not.
+**Windows 7 DHCP failure** ("unidentified network", 169.254.x.x address): fix 12 is a hypothesis, not a confirmed root cause. After a packet-filter or multicast change, the driver never told NDIS to resume sending, so a DHCP request could remain queued. Windows 7 makes several of those changes as the interface comes up; Server 2003 does not.
+
+Fix 12 calls `NdisMSendResourcesAvailable` after reset, but this has not been verified to fix the reported failure: the branch was not runtime-tested on Windows 7. A guest-side packet capture can show a DHCP Discover before the miniport transmits it, so it does not prove that the frame reached VirtualBox or that a DHCP Offer returned. Confirm the exchange with a VirtualBox NIC trace taken during `ipconfig /renew` before attributing the failure to this reset path.
 
 ## Build results
 
