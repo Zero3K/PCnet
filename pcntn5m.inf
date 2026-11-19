@@ -1,8 +1,8 @@
 ; pcntn5m.inf
 ;
-; AMD PCnet-PCI / PCnet-FAST family (Am79C970, 970A, 971, 972, 973, 975)
-; and Am79C978 PCnet-Home, NDIS 5.1 miniport. The chip runs in 16-bit
-; LANCE mode (SWSTYLE 0) with 24-bit DMA.
+; AMD PCnet-PCI / PCnet-FAST family (Am79C970, 970A, 971, 972, 973, 975),
+; NDIS 5.1 miniport. The chip runs in 16-bit LANCE mode (SWSTYLE 0) with
+; 24-bit DMA.
 ;
 ; Targets: Windows Server 2003 x86, Windows XP x86, Windows 7 x86 and
 ; ReactOS x86 (all load NDIS 5.1 miniports).
@@ -21,7 +21,6 @@ DriverVer   = 11/18/2026,1.0.0.0
 
 [AMD.NTx86]
 %PCNTN5M_PCNET.DeviceDesc% = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2000
-%PCNTN5M_HOME.DeviceDesc%  = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2001
 
 [PCNTN5M_PCI.ndi]
 Characteristics = 0x4   ; NCF_PHYSICAL
@@ -70,4 +69,3 @@ AMD                       = "AMD"
 DiskName                  = "pcntn5m driver disk"
 PCNTN5M.Service.DispName  = "AMD PCnet NDIS 5.1 miniport (pcntn5m)"
 PCNTN5M_PCNET.DeviceDesc  = "AMD PCnet-PCI/FAST Ethernet Adapter (Am79C970, Am79C970A, Am79C971, Am79C972, Am79C973, Am79C975)"
-PCNTN5M_HOME.DeviceDesc   = "AMD PCnet-Home Ethernet Adapter (Am79C978)"

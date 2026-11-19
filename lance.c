@@ -469,9 +469,9 @@ Return Value:
     Adapter->BeingRemoved = FALSE;
 
     //
-    // Every PCnet-PCI/FAST part enumerates as 1022:2000 (Am79C978 HomePNA
-    // as 1022:2001).  The chip itself is identified from CSR88/CSR89 once
-    // it has been reset, in LanceRegisterAdapter.
+    // Every supported PCnet-PCI/FAST part enumerates as 1022:2000.  The
+    // chip itself is identified from CSR88/CSR89 once it has been reset,
+    // in LanceRegisterAdapter.
     //
     PciId = 0;
     if (NdisReadPciSlotInformation(
@@ -481,8 +481,7 @@ Return Value:
             &PciId,
             sizeof(PciId)) == sizeof(PciId) &&
         (USHORT)(PciId & 0xffff) == PCNET_PCI_VENDOR_ID &&
-        ((USHORT)(PciId >> 16) == PCNET_PCI_DEVICE_ID ||
-         (USHORT)(PciId >> 16) == PCNET_HOME_PCI_DEVICE_ID))
+        (USHORT)(PciId >> 16) == PCNET_PCI_DEVICE_ID)
     {
         Adapter->PciDeviceId = (USHORT)(PciId >> 16);
         PciCommand = 0;

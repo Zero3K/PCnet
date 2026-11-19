@@ -63,13 +63,11 @@ Notes:
 #define LANCE_BCR18_BWRITE  ((USHORT)0x0020)
 
 //
-// Every PCnet-PCI/FAST part enumerates as 1022:2000; the Am79C978
-// HomePNA function enumerates as 1022:2001.  The individual chip is
-// identified by the part number in CSR88/CSR89, not by the PCI ID.
+// Supported PCnet-PCI/FAST parts enumerate as 1022:2000.  The individual
+// chip is identified by the part number in CSR88/CSR89, not by the PCI ID.
 //
 #define PCNET_PCI_VENDOR_ID         ((USHORT)0x1022)
 #define PCNET_PCI_DEVICE_ID         ((USHORT)0x2000)
-#define PCNET_HOME_PCI_DEVICE_ID    ((USHORT)0x2001)
 
 #define PCNET_CHIP_PART(ChipId)     ((USHORT)(((ChipId) >> 12) & 0xffff))
 
