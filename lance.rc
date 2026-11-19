@@ -31,8 +31,12 @@
 				VFT2_DRV_SOUND
 				VFT2_DRV_COMM
 */
-#define VER_FILEDESCRIPTION_STR     "AMD PCnet PCI Ethernet driver"
+#define VER_FILEDESCRIPTION_STR     "AMD PCnet LANCE-mode NDIS miniport (lancepci)"
 #define VER_INTERNALNAME_STR        "lancepci.sys"
 #define VER_ORIGINALFILENAME_STR    "lancepci.sys"
+
+/* Keep in step with DriverVer in lancepci.inf. */
+#define VER_FILEVERSION             1,0,0,0
+#define VER_FILEVERSION_STR         "1.0.0.0"
 
 #include "common.ver"
