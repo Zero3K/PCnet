@@ -1,0 +1,112 @@
+
+; lancepci.inf
+; AMD PCnet PCI Ethernet adapter
+; Supports Windows 2000, XP, Server 2003, Windows 7 x86 and x64.
+
+[Version]
+Signature   = "$Windows NT$"
+Class       = Net
+ClassGUID   = {4d36e972-e325-11ce-bfc1-08002be10318}
+Provider    = %AMD%
+DriverVer   = 02/14/2024,5.0.0.0
+CatalogFile.NTamd64 = lancepci.cat
+
+[Manufacturer]
+%AMD% = AMD,NT,NTx86,NTamd64
+
+; Windows 2000
+[AMD.NT]
+%LANCEPCI_PCI0.DeviceDesc%  = LANCEPCI_PCI.ndi, PCI\VEN_1022&DEV_2000
+%LANCEPCI_PCI1.DeviceDesc%  = LANCEPCI_PCI.ndi, PCI\VEN_1022&DEV_2001
+%LANCEPCI_PCI1.DeviceDesc%  = LANCEPCI_PCI.ndi, PCI\VEN_1022&DEV_2621
+%LANCEPCI_FAST1.DeviceDesc% = LANCEPCI_PCI.ndi, PCI\VEN_1022&DEV_2623
+%LANCEPCI_FAST2.DeviceDesc% = LANCEPCI_PCI.ndi, PCI\VEN_1022&DEV_2624
+%LANCEPCI_FAST3.DeviceDesc% = LANCEPCI_PCI.ndi, PCI\VEN_1022&DEV_2625
+%LANCEPCI_FAST3B.DeviceDesc% = LANCEPCI_PCI.ndi, PCI\VEN_1022&DEV_2627
+%LANCEPCI_PCI3.DeviceDesc%  = LANCEPCI_PCI.ndi, PCI\VEN_1022&DEV_2626
+
+; Windows XP, Server 2003, Vista and Windows 7 x86
+[AMD.NTx86]
+%LANCEPCI_PCI0.DeviceDesc%  = LANCEPCI_PCI.ndi, PCI\VEN_1022&DEV_2000
+%LANCEPCI_PCI1.DeviceDesc%  = LANCEPCI_PCI.ndi, PCI\VEN_1022&DEV_2001
+%LANCEPCI_PCI1.DeviceDesc%  = LANCEPCI_PCI.ndi, PCI\VEN_1022&DEV_2621
+%LANCEPCI_FAST1.DeviceDesc% = LANCEPCI_PCI.ndi, PCI\VEN_1022&DEV_2623
+%LANCEPCI_FAST2.DeviceDesc% = LANCEPCI_PCI.ndi, PCI\VEN_1022&DEV_2624
+%LANCEPCI_FAST3.DeviceDesc% = LANCEPCI_PCI.ndi, PCI\VEN_1022&DEV_2625
+%LANCEPCI_FAST3B.DeviceDesc% = LANCEPCI_PCI.ndi, PCI\VEN_1022&DEV_2627
+%LANCEPCI_PCI3.DeviceDesc%  = LANCEPCI_PCI.ndi, PCI\VEN_1022&DEV_2626
+
+; Windows 7 x64 / AMD64
+[AMD.NTamd64]
+%LANCEPCI_PCI0.DeviceDesc%  = LANCEPCI_PCI.ndi, PCI\VEN_1022&DEV_2000
+%LANCEPCI_PCI1.DeviceDesc%  = LANCEPCI_PCI.ndi, PCI\VEN_1022&DEV_2001
+%LANCEPCI_PCI1.DeviceDesc%  = LANCEPCI_PCI.ndi, PCI\VEN_1022&DEV_2621
+%LANCEPCI_FAST1.DeviceDesc% = LANCEPCI_PCI.ndi, PCI\VEN_1022&DEV_2623
+%LANCEPCI_FAST2.DeviceDesc% = LANCEPCI_PCI.ndi, PCI\VEN_1022&DEV_2624
+%LANCEPCI_FAST3.DeviceDesc% = LANCEPCI_PCI.ndi, PCI\VEN_1022&DEV_2625
+%LANCEPCI_FAST3B.DeviceDesc% = LANCEPCI_PCI.ndi, PCI\VEN_1022&DEV_2627
+%LANCEPCI_PCI3.DeviceDesc%  = LANCEPCI_PCI.ndi, PCI\VEN_1022&DEV_2626
+
+; PCI adapter installation
+[LANCEPCI_PCI.ndi]
+Characteristics = 0x4
+BusType         = 5    ; PCI
+AddReg          = LANCEPCI_PCI.ndi.reg
+CopyFiles       = LANCEPCI.CopyFiles
+
+[LANCEPCI_PCI.ndi.Services]
+AddService = LANCEPCI, 2, LANCEPCI.Service, LANCEPCI.EventLog
+
+[LANCEPCI_PCI.ndi.reg]
+HKR, Ndi,              Service,    0, "LANCEPCI"
+HKR, Ndi\Interfaces,   UpperRange, 0, "ndis5"
+HKR, Ndi\Interfaces,   LowerRange, 0, "ethernet"
+
+HKR, Ndi, *IfType,            0x00010003, 6
+HKR, Ndi, *MediaType,         0x00010003, 0
+HKR, Ndi, *PhysicalMediaType, 0x00010003, 0
+
+HKR, , BusType, 0x00010001, 5
+
+; Kernel driver service
+[LANCEPCI.Service]
+DisplayName    = %LANCEPCI.Service.DispName%
+ServiceType    = 1
+StartType      = 3
+ErrorControl   = 1
+ServiceBinary  = %12%\lancepci.sys
+LoadOrderGroup = NDIS
+
+; Event logging
+[LANCEPCI.EventLog]
+AddReg = LANCEPCI.EventLog.reg
+
+[LANCEPCI.EventLog.reg]
+HKR,, EventMessageFile, 0x00020000, "%%SystemRoot%%\System32\netevent.dll"
+HKR,, TypesSupported,   0x00010001, 7
+
+; Driver file
+[LANCEPCI.CopyFiles]
+lancepci.sys
+
+[DestinationDirs]
+LANCEPCI.CopyFiles = 12
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+lancepci.sys = 1
+
+[Strings]
+AMD                      = "AMD"
+LANCEPCI.Service.DispName = "AMD PCnet PCI Miniport"
+DiskName                 = "AMD PCnet PCI Driver Disk"
+
+LANCEPCI_PCI0.DeviceDesc  = "AMD PCnet-PCI Ethernet Adapter (Am79C970)"
+LANCEPCI_PCI1.DeviceDesc  = "AMD PCnet-PCI II Ethernet Adapter"
+LANCEPCI_PCI3.DeviceDesc  = "AMD PCnet-FAST III Ethernet Adapter (Am79C973)"
+LANCEPCI_FAST1.DeviceDesc = "AMD PCnet-FAST Ethernet Adapter (Am79C971)"
+LANCEPCI_FAST2.DeviceDesc = "AMD PCnet-FAST+ Ethernet Adapter (Am79C972)"
+LANCEPCI_FAST3.DeviceDesc  = "AMD PCnet-FAST III Ethernet Adapter (Am79C973)"
+LANCEPCI_FAST3B.DeviceDesc = "AMD PCnet-FAST III Ethernet Adapter (Am79C975)"
