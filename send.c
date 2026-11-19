@@ -269,7 +269,7 @@ Return Value:
             //
             // Now Acquire the ring
             //
-            RingIndex = Adapter->AllocateableRing - Adapter->TransmitRing;
+            RingIndex = (UINT)(Adapter->AllocateableRing - Adapter->TransmitRing);
 
             //
             // Store the info

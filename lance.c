@@ -3715,7 +3715,7 @@ Return Value:
     }
     else
     {
-        FirstIndex = Adapter->TransmittingRing - Adapter->TransmitRing;
+        FirstIndex = (UINT)(Adapter->TransmittingRing - Adapter->TransmitRing);
     }
 
 
@@ -3850,10 +3850,10 @@ Return Value:
                 //
 
                 Adapter->NumberOfAvailableRings +=
-                    (CurrentRingEntry <= LastRingEntry)?
+                    (UINT)((CurrentRingEntry <= LastRingEntry)?
                      ((LastRingEntry - CurrentRingEntry)+1):
                      ((Adapter->LastTransmitRingEntry - CurrentRingEntry) +
-                        (LastRingEntry-Adapter->TransmitRing) + 2);
+                        (LastRingEntry-Adapter->TransmitRing) + 2));
 
                 if (LastRingEntry == Adapter->LastTransmitRingEntry)
                 {
