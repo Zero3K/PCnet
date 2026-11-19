@@ -122,6 +122,7 @@ Run the full checklist in section 5 on each OS, with both adapter types (PCnet-F
   - XP shows a "has not passed Windows Logo testing" warning: choose *Continue Anyway*.
   - Windows 7 x86 shows "Windows can't verify the publisher": choose *Install this driver software anyway*. 32-bit Windows 7 does not enforce kernel-mode signing, so no test-signing mode is needed.
 - **Confirm the driver.** Driver Details must show `lancepci.sys`, and `sc query lancepci` must report RUNNING. On Windows 7, also run `driverquery /v | findstr /i lancepci`.
+- **Event Viewer.** Check *Event Viewer → Windows Logs → System* for `LANCEPCI` events after install and after each failed test. Save the event details, including the binary data, with the debugger output.
 - **Debugger.**
   - On XP, add `/DEBUG /DEBUGPORT=COM1 /BAUDRATE=115200` to `boot.ini`, as on Server 2003.
   - On Windows 7, from an elevated prompt run `bcdedit /debug on` and then `bcdedit /dbgsettings serial debugport:1 baudrate:115200`.

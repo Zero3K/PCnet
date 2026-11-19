@@ -213,7 +213,9 @@ LanceConfigureChip(
 STATIC
 BOOLEAN
 LanceCheckWioMode(
-    IN PLANCE_ADAPTER Adapter
+    IN PLANCE_ADAPTER Adapter,
+    OUT PUSHORT RapValue,
+    OUT PUSHORT Csr0Value
     );
 
 VOID
@@ -420,6 +422,7 @@ Return Value:
     UINT Length = 0;
 
     ULONG PciId;
+    UINT PciBytesRead;
     USHORT PciCommand;
     NDIS_STATUS PciResourceStatus;
 
@@ -458,6 +461,11 @@ Return Value:
     LANCE_ALLOC_PHYS(&Adapter, sizeof(LANCE_ADAPTER));
     if (Adapter == NULL)
     {
+        NdisWriteErrorLogEntry(
+            MiniportAdapterHandle,
+            NDIS_ERROR_CODE_OUT_OF_RESOURCES,
+            0
+            );
         return( NDIS_STATUS_RESOURCES ) ;
     }
 
@@ -474,12 +482,13 @@ Return Value:
     // it has been reset, in LanceRegisterAdapter.
     //
     PciId = 0;
-    if (NdisReadPciSlotInformation(
-            MiniportAdapterHandle,
-            0,
-            0,
-            &PciId,
-            sizeof(PciId)) == sizeof(PciId) &&
+    PciBytesRead = NdisReadPciSlotInformation(
+                       MiniportAdapterHandle,
+                       0,
+                       0,
+                       &PciId,
+                       sizeof(PciId));
+    if (PciBytesRead == sizeof(PciId) &&
         (USHORT)(PciId & 0xffff) == PCNET_PCI_VENDOR_ID &&
         ((USHORT)(PciId >> 16) == PCNET_PCI_DEVICE_ID ||
          (USHORT)(PciId >> 16) == PCNET_HOME_PCI_DEVICE_ID))
@@ -494,6 +503,14 @@ Return Value:
                 &PciCommand,
                 sizeof(PciCommand)) != sizeof(PciCommand))
         {
+            NdisWriteErrorLogEntry(
+                MiniportAdapterHandle,
+                NDIS_ERROR_CODE_ADAPTER_NOT_FOUND,
+                3,
+                PciId,
+                (ULONG)0x04,
+                (ULONG)0
+                );
             LANCE_FREE_PHYS(Adapter, sizeof(LANCE_ADAPTER));
             return(NDIS_STATUS_ADAPTER_NOT_FOUND);
         }
@@ -506,6 +523,14 @@ Return Value:
                 &PciCommand,
                 sizeof(PciCommand)) != sizeof(PciCommand))
         {
+            NdisWriteErrorLogEntry(
+                MiniportAdapterHandle,
+                NDIS_ERROR_CODE_ADAPTER_NOT_FOUND,
+                3,
+                PciId,
+                (ULONG)0x04,
+                (ULONG)1
+                );
             LANCE_FREE_PHYS(Adapter, sizeof(LANCE_ADAPTER));
             return(NDIS_STATUS_ADAPTER_NOT_FOUND);
         }
@@ -526,12 +551,26 @@ Return Value:
                                 );
         if (PciResourceStatus != NDIS_STATUS_SUCCESS)
         {
+            NdisWriteErrorLogEntry(
+                MiniportAdapterHandle,
+                NDIS_ERROR_CODE_RESOURCE_CONFLICT,
+                2,
+                PciId,
+                (ULONG)PciResourceStatus
+                );
             LANCE_FREE_PHYS(Adapter, sizeof(LANCE_ADAPTER));
             return(PciResourceStatus);
         }
     }
     else
     {
+        NdisWriteErrorLogEntry(
+            MiniportAdapterHandle,
+            NDIS_ERROR_CODE_ADAPTER_NOT_FOUND,
+            2,
+            PciId,
+            (ULONG)PciBytesRead
+            );
         LANCE_FREE_PHYS(Adapter, sizeof(LANCE_ADAPTER));
         return(NDIS_STATUS_ADAPTER_NOT_FOUND);
     }
@@ -539,6 +578,13 @@ Return Value:
     NdisOpenConfiguration(&Status, &ConfigHandle, ConfigurationHandle);
     if (Status != NDIS_STATUS_SUCCESS)
     {
+        NdisWriteErrorLogEntry(
+            MiniportAdapterHandle,
+            NDIS_ERROR_CODE_DRIVER_FAILURE,
+            2,
+            PciId,
+            (ULONG)Status
+            );
         LANCE_FREE_PHYS(Adapter, sizeof(LANCE_ADAPTER));
         return(Status);
     }
@@ -601,6 +647,14 @@ Return Value:
 
     if (Status != NDIS_STATUS_SUCCESS) {
 
+        NdisWriteErrorLogEntry(
+            MiniportAdapterHandle,
+            NDIS_ERROR_CODE_RESOURCE_CONFLICT,
+            3,
+            (ULONG)Adapter->PciDeviceId,
+            (ULONG)Adapter->IoBaseAddr,
+            (ULONG)Status
+            );
         LANCE_FREE_PHYS(Adapter, sizeof(LANCE_ADAPTER));
 
         return Status;
@@ -992,7 +1046,9 @@ LanceIdentifyChip(
 STATIC
 BOOLEAN
 LanceCheckWioMode(
-    IN PLANCE_ADAPTER Adapter
+    IN PLANCE_ADAPTER Adapter,
+    OUT PUSHORT RapValue,
+    OUT PUSHORT Csr0Value
     )
 
 /*++
@@ -1019,18 +1075,16 @@ Return Value:
 --*/
 
 {
-    USHORT Csr0;
-    USHORT Rap;
-
     PAGED_CODE();
 
     NdisRawWritePortUshort(Adapter->RAP, LANCE_SELECT_CSR88);
-    NdisRawReadPortUshort(Adapter->RAP, &Rap);
+    NdisRawReadPortUshort(Adapter->RAP, RapValue);
 
     NdisRawWritePortUshort(Adapter->RAP, LANCE_SELECT_CSR0);
-    NdisRawReadPortUshort(Adapter->RDP, &Csr0);
+    NdisRawReadPortUshort(Adapter->RDP, Csr0Value);
 
-    if ((Rap == LANCE_SELECT_CSR88) && (Csr0 == LANCE_CSR0_STOP)) {
+    if ((*RapValue == LANCE_SELECT_CSR88) &&
+        (*Csr0Value == LANCE_CSR0_STOP)) {
         return TRUE;
     }
 
@@ -1038,7 +1092,7 @@ Return Value:
              "reset (RAP readback 0x%04x, CSR0 0x%04x).  The chip may have "
              "been left in 32-bit DWIO mode by another driver; only a "
              "hardware reset (cold boot) clears that.\n",
-             Adapter->IoPortBase, Rap, Csr0);
+             Adapter->IoPortBase, *RapValue, *Csr0Value);
 
     return FALSE;
 }
@@ -1130,6 +1184,8 @@ Return Value:
     //
     NDIS_STATUS Status;
     USHORT ResetValue;
+    USHORT RapValue;
+    USHORT Csr0Value;
 
     PAGED_CODE();
 
@@ -1228,7 +1284,10 @@ Return Value:
             NdisWriteErrorLogEntry(
                 Adapter->MiniportAdapterHandle,
                 NDIS_ERROR_CODE_RESOURCE_CONFLICT,
-                0
+                3,
+                (ULONG)Adapter->IoBaseAddr,
+                (ULONG)Adapter->AmountOfHardwareMemory,
+                (ULONG)Status
                 );
 
             return(Status);
@@ -1247,7 +1306,10 @@ Return Value:
             NdisWriteErrorLogEntry(
                 Adapter->MiniportAdapterHandle,
                 NDIS_ERROR_CODE_OUT_OF_RESOURCES,
-                0
+                3,
+                (ULONG)Adapter->IoBaseAddr,
+                (ULONG)Adapter->AmountOfHardwareMemory,
+                (ULONG)Adapter->PciDeviceId
                 );
 
             MmFreeContiguousMemory(Adapter->MmMappedBaseAddr);
@@ -1288,13 +1350,15 @@ Return Value:
         NdisRawReadPortUshort(Adapter->IoPortBase + 0x14, &ResetValue);
         NdisStallExecution(1000);
 
-        if (!LanceCheckWioMode(Adapter)) {
+        if (!LanceCheckWioMode(Adapter, &RapValue, &Csr0Value)) {
 
             NdisWriteErrorLogEntry(
                 Adapter->MiniportAdapterHandle,
                 NDIS_ERROR_CODE_HARDWARE_FAILURE,
-                1,
-                (ULONG)Adapter->IoPortBase
+                3,
+                (ULONG)Adapter->IoPortBase,
+                (ULONG)RapValue,
+                (ULONG)Csr0Value
                 );
 
             MmFreeContiguousMemory(Adapter->MmMappedBaseAddr);
@@ -1345,7 +1409,10 @@ Return Value:
             NdisWriteErrorLogEntry(
                 Adapter->MiniportAdapterHandle,
                 NDIS_ERROR_CODE_INTERRUPT_CONNECT,
-                0
+                3,
+                (ULONG)Adapter->InterruptNumber,
+                (ULONG)Adapter->InterruptRequestLevel,
+                (ULONG)Status
                 );
 
             MmFreeContiguousMemory(Adapter->MmMappedBaseAddr);
@@ -1362,7 +1429,11 @@ Return Value:
             NdisWriteErrorLogEntry(
                 Adapter->MiniportAdapterHandle,
                 NDIS_ERROR_CODE_HARDWARE_FAILURE,
-                0
+                4,
+                (ULONG)Adapter->PciDeviceId,
+                (ULONG)Adapter->IoBaseAddr,
+                (ULONG)Adapter->InterruptNumber,
+                (ULONG)Status
                 );
 
             //
@@ -1409,7 +1480,15 @@ Return Value:
         NdisWriteErrorLogEntry(
             Adapter->MiniportAdapterHandle,
             NDIS_ERROR_CODE_ADAPTER_NOT_FOUND,
-            0
+            4,
+            (ULONG)Adapter->PciDeviceId,
+            (ULONG)Adapter->IoBaseAddr,
+            (ULONG)((UCHAR)Adapter->NetworkAddress[0] |
+                    ((ULONG)(UCHAR)Adapter->NetworkAddress[1] << 8) |
+                    ((ULONG)(UCHAR)Adapter->NetworkAddress[2] << 16) |
+                    ((ULONG)(UCHAR)Adapter->NetworkAddress[3] << 24)),
+            (ULONG)((UCHAR)Adapter->NetworkAddress[4] |
+                    ((ULONG)(UCHAR)Adapter->NetworkAddress[5] << 8))
             );
 
         return NDIS_STATUS_FAILURE;
