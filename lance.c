@@ -2719,7 +2719,19 @@ Return Value:
 
         case OID_GEN_LINK_SPEED:
 
-            GenericULong = (ULONG)(100000);
+            switch (Adapter->ChipPart)
+            {
+                case PCNET_PART_79C971:
+                case PCNET_PART_79C972:
+                case PCNET_PART_79C973:
+                case PCNET_PART_79C975:
+                    GenericULong = (ULONG)1000000;
+                    break;
+
+                default:
+                    GenericULong = (ULONG)100000;
+                    break;
+            }
 
             break;
 
