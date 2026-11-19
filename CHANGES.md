@@ -79,7 +79,7 @@ Each entry gives what was wrong, what changed, and how to verify it. The test nu
 
 ### Reviewed and found correct (no change)
 
-- **24-bit DMA.** Map registers are allocated with `NDIS_DMA_24BITS`, and master allocates the DMA pool with a highest acceptable address of 0x00FFFFFF, so it lies entirely below 16 MB. Every descriptor and buffer address is taken from that pool. The high byte comes from `(addr >> 16) & 0xff`, and CSR2[15:8] (the upper address byte in 16-bit mode) is written as 0.
+- **24-bit DMA.** The driver allocates its contiguous DMA pool with a highest acceptable address of 0x00FFFFFF, so it lies entirely below 16 MB. Every descriptor and buffer address is taken from that pool. The high byte comes from `(addr >> 16) & 0xff`, and CSR2[15:8] (the upper address byte in 16-bit mode) is written as 0.
 - **Register offsets.** RDP 0x10, RAP 0x12, reset 0x14 and BDP 0x16 are correct for WIO mode.
 
 ## Untested

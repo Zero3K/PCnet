@@ -172,6 +172,7 @@ Return Value:
     // buffer.
     //
     UINT SourceLength;
+    UINT BufferListNext;
 
     NDIS_STATUS Status;
 
@@ -250,6 +251,7 @@ Return Value:
 
                     BufferDescriptor = Adapter->LanceBuffers + LanceBuffersIndex;
                     Adapter->LanceBufferListHeads[i] = BufferDescriptor->Next;
+                    BufferListNext = BufferDescriptor->Next;
                     break;
 
                 }
@@ -303,17 +305,31 @@ Return Value:
 
             while ( SourceBuffer != NULL ) {
 
-                NdisQueryBuffer(
+                SourceLength = 0;
+                SourceData = NdisQueryBufferSafe(
                         SourceBuffer,
                         &SourceData,
-                        &SourceLength
+                        &SourceLength,
+                        NormalPagePriority
                         );
 
-                LANCE_MOVE_MEMORY_TO_HARDWARE(
-                    CurrentDestination,
-                    SourceData,
-                    SourceLength
-                    );
+                if ((SourceData == NULL) && (SourceLength != 0))
+                {
+                    BufferDescriptor->Next = BufferListNext;
+                    Adapter->LanceBufferListHeads[i] = LanceBuffersIndex;
+                    Adapter->AllocateableRing = CurrentRingElement;
+                    Adapter->NumberOfAvailableRings++;
+                    return NDIS_STATUS_RESOURCES;
+                }
+
+                if (SourceLength != 0)
+                {
+                    LANCE_MOVE_MEMORY_TO_HARDWARE(
+                        CurrentDestination,
+                        SourceData,
+                        SourceLength
+                        );
+                }
 
                 CurrentDestination = (PCHAR)CurrentDestination + SourceLength;
 

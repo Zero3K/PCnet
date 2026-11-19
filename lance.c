@@ -50,16 +50,6 @@ UCHAR LanceSendFailPlace = 0;
 NDIS_HANDLE LanceNdisWrapperHandle = NULL;
 PDRIVER_OBJECT LanceDriverObject = NULL;
 
-//
-// This constant is used for places where NdisAllocateMemory
-// needs to be called and the HighestAcceptableAddress does
-// not matter.
-//
-
-NDIS_PHYSICAL_ADDRESS HighestAcceptableMax =
-    NDIS_PHYSICAL_ADDRESS_CONST(-1,-1);
-
-
 #if LANCELOG
 
 UCHAR Log[LOG_SIZE] = {0};
@@ -291,11 +281,7 @@ LanceInitialInit(
     IN PLANCE_ADAPTER Adapter
     );
 
-NTSTATUS
-DriverEntry(
-    IN PDRIVER_OBJECT DriverObject,
-    IN PUNICODE_STRING RegistryPath
-    );
+DRIVER_INITIALIZE DriverEntry;
 
 
 
@@ -439,6 +425,7 @@ Return Value:
 
     NDIS_STATUS Status;
 
+    PAGED_CODE();
 
     //
     // Search for correct medium.
@@ -585,7 +572,8 @@ Return Value:
         ConfigHandle
     );
 
-    if ((Length == LANCE_LENGTH_OF_ADDRESS) && (Status == NDIS_STATUS_SUCCESS))
+    if ((Status == NDIS_STATUS_SUCCESS) &&
+        (Length == LANCE_LENGTH_OF_ADDRESS))
     {
         NdisMoveMemory(
             Adapter->CurrentNetworkAddress,
@@ -595,22 +583,6 @@ Return Value:
     }
 
     NdisCloseConfiguration(ConfigHandle);
-    Status = NdisMAllocateMapRegisters(
-        MiniportAdapterHandle,
-        0,
-        NDIS_DMA_24BITS,
-        1,
-        Adapter->AmountOfHardwareMemory
-        );
-
-    if (Status != NDIS_STATUS_SUCCESS)
-    {
-        LANCE_FREE_PHYS(Adapter, sizeof(LANCE_ADAPTER));
-        return(Status);
-    }
-
-    Adapter->MapRegistersAllocated = TRUE;
-
     //
     // Register the IoPortRanges
     //
@@ -628,11 +600,6 @@ Return Value:
     Adapter->NetworkHardwareAddress = Adapter->IoPortBase;
 
     if (Status != NDIS_STATUS_SUCCESS) {
-
-        if (Adapter->MapRegistersAllocated) {
-            NdisMFreeMapRegisters(MiniportAdapterHandle);
-            Adapter->MapRegistersAllocated = FALSE;
-        }
 
         LANCE_FREE_PHYS(Adapter, sizeof(LANCE_ADAPTER));
 
@@ -670,10 +637,6 @@ Fail1:
             0x20,
             (PVOID)(Adapter->IoPortBase)
             );
-    }
-
-    if (Adapter->MapRegistersAllocated) {
-        NdisMFreeMapRegisters(MiniportAdapterHandle);
     }
 
     LANCE_FREE_PHYS(Adapter, sizeof(LANCE_ADAPTER));
@@ -733,14 +696,23 @@ Return Value:
     NdisMDeregisterInterrupt(&(Adapter->Interrupt));
 
     //
-    // 3. The DPC can arm the deferred timer; make sure it will not fire
-    //    against a freed adapter.
+    // 3. Stop deferred timer processing before freeing the adapter.
     //
+    Adapter->ResetInProgress = FALSE;
     NdisMCancelTimer(&Adapter->DeferredTimer, &TimerCancelled);
+    if (!TimerCancelled)
+    {
+        KeFlushQueuedDpcs();
+        NdisMCancelTimer(&Adapter->DeferredTimer, &TimerCancelled);
+        if (!TimerCancelled)
+        {
+            KeFlushQueuedDpcs();
+        }
+    }
 
     //
     // 4. With the chip stopped and nothing left to call back into us,
-    //    release the DMA memory, then the map registers that cover it.
+    //    release the DMA memory.
     //
     if (Adapter->SharedMemoryAllocated)
     {
@@ -749,11 +721,6 @@ Return Value:
     }
 
     DeleteAdapterMemory(Adapter);
-
-    if (Adapter->MapRegistersAllocated) {
-        NdisMFreeMapRegisters(Adapter->MiniportAdapterHandle);
-        Adapter->MapRegistersAllocated = FALSE;
-    }
 
     //
     // 5. The I/O range goes last: nothing above touches the ports any more.
@@ -850,6 +817,8 @@ LancePciHardwareDetails(
     UINT i;
     BOOLEAN AllZero = TRUE;
     BOOLEAN AllOnes = TRUE;
+
+    PAGED_CODE();
 
     for (i = 0; i < LANCE_LENGTH_OF_ADDRESS; i++)
     {
@@ -970,6 +939,8 @@ LanceIdentifyChip(
     USHORT Low;
     USHORT High;
 
+    PAGED_CODE();
+
     LANCE_WRITE_RAP(Adapter, LANCE_SELECT_CSR88);
     LANCE_READ_RDP(Adapter, &Low);
     LANCE_WRITE_RAP(Adapter, LANCE_SELECT_CSR89);
@@ -1051,6 +1022,8 @@ Return Value:
     USHORT Csr0;
     USHORT Rap;
 
+    PAGED_CODE();
+
     NdisRawWritePortUshort(Adapter->RAP, LANCE_SELECT_CSR88);
     NdisRawReadPortUshort(Adapter->RAP, &Rap);
 
@@ -1079,6 +1052,8 @@ LanceConfigureChip(
     )
 {
     USHORT Bcr18;
+
+    PAGED_CODE();
 
     //
     // CSR4: enable DMAPLUS but keep the reset-default masks for the
@@ -1156,6 +1131,7 @@ Return Value:
     NDIS_STATUS Status;
     USHORT ResetValue;
 
+    PAGED_CODE();
 
     //
     // We put in this assertion to make sure that ushort are 2 bytes.
@@ -1406,7 +1382,17 @@ Return Value:
 
             {
                 BOOLEAN TimerCancelled;
+                Adapter->ResetInProgress = FALSE;
                 NdisMCancelTimer(&Adapter->DeferredTimer, &TimerCancelled);
+                if (!TimerCancelled)
+                {
+                    KeFlushQueuedDpcs();
+                    NdisMCancelTimer(&Adapter->DeferredTimer, &TimerCancelled);
+                    if (!TimerCancelled)
+                    {
+                        KeFlushQueuedDpcs();
+                    }
+                }
             }
 
             MmFreeContiguousMemory(Adapter->MmMappedBaseAddr);
@@ -1458,6 +1444,8 @@ Return Value:
 
 {
     UINT i;
+
+    PAGED_CODE();
 
     SetInitBlockAndInit(Adapter);
 
@@ -2118,6 +2106,7 @@ Return Value:
     ULONG NumberOfMediumBuffers;
     ULONG NumberOfLargeBuffers;
 
+    PAGED_CODE();
 
     NumberOfSmallBuffers = Adapter->NumberOfSmallBuffers;
     NumberOfMediumBuffers = Adapter->NumberOfMediumBuffers;

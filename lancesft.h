@@ -102,13 +102,11 @@ extern UCHAR LogWrapped;
 
 
 
-extern NDIS_PHYSICAL_ADDRESS HighestAcceptableMax;
-
 //
 // ZZZ These macros are peculiar to NT.
 //
 
-#define LANCE_ALLOC_PHYS(pp, s) NdisAllocateMemory((PVOID *)(pp),(s),0,HighestAcceptableMax)
+#define LANCE_ALLOC_PHYS(pp, s) NdisAllocateMemoryWithTag((PVOID *)(pp),(s),'LANC')
 #define LANCE_FREE_PHYS(p, s) NdisFreeMemory((PVOID)(p),(s),0)
 #define LANCE_MOVE_MEMORY(Destination,Source,Length) NdisMoveMemory(Destination,Source,Length)
 #define LANCE_ZERO_MEMORY(Destination,Length) NdisZeroMemory(Destination,Length)
@@ -350,7 +348,6 @@ typedef struct _LANCE_ADAPTER {
     // PCI PCnet shared-memory pool and bus address.
     //
     BOOLEAN SharedMemoryAllocated;
-    BOOLEAN MapRegistersAllocated;
     BOOLEAN IoPortsRegistered;
     NDIS_PHYSICAL_ADDRESS SharedMemoryPhysicalAddress;
 
