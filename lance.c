@@ -706,35 +706,66 @@ Return Value:
 {
 
     PLANCE_ADAPTER Adapter;
+    BOOLEAN TimerCancelled;
 
     Adapter = PLANCE_ADAPTER_FROM_CONTEXT_HANDLE(MiniportAdapterContext);
 
     LOG(REMOVE);
 
     //
-    // bug 2275
+    // 1. Stop the chip, synchronized with the ISR so the RAP write cannot
+    //    land between the ISR's RAP save and restore on another CPU.
+    //    After a surprise removal there is no chip to stop.
     //
+    if (!Adapter->SurpriseRemoved)
+    {
+        NdisMSynchronizeWithInterrupt(
+            &Adapter->Interrupt,
+            LanceSyncStopChip,
+            (PVOID)Adapter
+            );
+    }
 
-    LanceSyncStopChip(Adapter);
-
+    //
+    // 2. Disconnect the interrupt.  This also waits for a DPC that is
+    //    already queued or running.
+    //
     NdisMDeregisterInterrupt(&(Adapter->Interrupt));
 
-    NdisMDeregisterIoPortRange(
-        Adapter->MiniportAdapterHandle,
-        Adapter->IoBaseAddr,
-        0x20,
-        (PVOID)(Adapter->IoPortBase)
-        );
+    //
+    // 3. The DPC can arm the deferred timer; make sure it will not fire
+    //    against a freed adapter.
+    //
+    NdisMCancelTimer(&Adapter->DeferredTimer, &TimerCancelled);
 
+    //
+    // 4. With the chip stopped and nothing left to call back into us,
+    //    release the DMA memory, then the map registers that cover it.
+    //
     if (Adapter->SharedMemoryAllocated)
     {
         MmFreeContiguousMemory(Adapter->MmMappedBaseAddr);
+        Adapter->SharedMemoryAllocated = FALSE;
     }
 
     DeleteAdapterMemory(Adapter);
 
     if (Adapter->MapRegistersAllocated) {
         NdisMFreeMapRegisters(Adapter->MiniportAdapterHandle);
+        Adapter->MapRegistersAllocated = FALSE;
+    }
+
+    //
+    // 5. The I/O range goes last: nothing above touches the ports any more.
+    //
+    if (Adapter->IoPortsRegistered) {
+        NdisMDeregisterIoPortRange(
+            Adapter->MiniportAdapterHandle,
+            Adapter->IoBaseAddr,
+            0x20,
+            (PVOID)(Adapter->IoPortBase)
+            );
+        Adapter->IoPortsRegistered = FALSE;
     }
 
     NdisFreeMemory(Adapter, sizeof(LANCE_ADAPTER), 0);
