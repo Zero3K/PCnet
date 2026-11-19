@@ -306,7 +306,7 @@ Return Value:
             while ( SourceBuffer != NULL ) {
 
                 SourceLength = 0;
-                SourceData = NdisQueryBufferSafe(
+                NdisQueryBufferSafe(
                         SourceBuffer,
                         &SourceData,
                         &SourceLength,
