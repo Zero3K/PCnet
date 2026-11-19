@@ -52,6 +52,44 @@ LanceTraceSample(
                      (Count <= 8 || (Count & (Count - 1)) == 0));
 }
 
+#define LANCE_TRACE_BUFFER_PREFIX 64
+
+typedef struct _LANCE_TRACE_BUFFER_SUMMARY {
+    ULONG BytesExamined;
+    ULONG NonZeroBytes;
+    ULONG Checksum;
+    ULONG FirstNonZeroOffset;
+} LANCE_TRACE_BUFFER_SUMMARY, *PLANCE_TRACE_BUFFER_SUMMARY;
+
+static __inline VOID
+LanceTraceBufferSummary(
+    IN const UCHAR *Buffer,
+    IN ULONG Length,
+    OUT PLANCE_TRACE_BUFFER_SUMMARY Summary
+    )
+{
+    ULONG i;
+
+    Summary->BytesExamined = (Length < LANCE_TRACE_BUFFER_PREFIX) ?
+                             Length : LANCE_TRACE_BUFFER_PREFIX;
+    Summary->NonZeroBytes = 0;
+    Summary->Checksum = 0;
+    Summary->FirstNonZeroOffset = Summary->BytesExamined;
+
+    for (i = 0; i < Summary->BytesExamined; i++)
+    {
+        Summary->Checksum += Buffer[i];
+        if (Buffer[i] != 0)
+        {
+            if (Summary->NonZeroBytes == 0)
+            {
+                Summary->FirstNonZeroOffset = i;
+            }
+            Summary->NonZeroBytes++;
+        }
+    }
+}
+
 #if DBG
 
 #define LANCELOG 1

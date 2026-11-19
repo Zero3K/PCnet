@@ -109,6 +109,13 @@ then powers of two per adapter/category to limit debugger traffic; they do not
 include packet contents. A missing line alone is not proof of a stuck path:
 the debugger may attach too late or messages may be filtered or lost.
 
+Sampled send and receive lines also report the descriptor DMA address (`dma`),
+the address calculated from the host buffer (`expected`), and a summary of up
+to the first 64 bytes in that buffer. `nonzero`, `sum`, and `firstNonzero` help
+determine whether bytes were present before transmit or after receive DMA
+without printing packet contents. `prefix` is the number of bytes examined;
+`firstNonzero` equals `prefix` when they are all zero.
+
 ## 5. Test checklist
 
 Run every item on both adapter types. Write down the result and anything odd in the debug output.

@@ -449,9 +449,33 @@ Return Value:
 
             if (LanceTraceSample(&Adapter->TraceSends))
             {
-                DbgPrint("lancepci: send adapter=%p queued length=%lu ring=%u available=%u completed=%lu\n",
+                LANCE_TRACE_BUFFER_SUMMARY BufferSummary;
+                ULONG DescriptorAddress;
+                ULONG ExpectedAddress;
+
+                LanceTraceBufferSummary(
+                    (const UCHAR *)BufferDescriptor->VirtualLanceBuffer,
+                    BufferDescriptor->DataLength,
+                    &BufferSummary
+                    );
+                DescriptorAddress =
+                    ((ULONG)CurrentRingElement->HighTransmitBufferAddress << 16) |
+                    CurrentRingElement->LowTransmitBufferAddress;
+                ExpectedAddress = LANCE_GET_HARDWARE_PHYSICAL_ADDRESS(
+                    Adapter,
+                    BufferDescriptor->VirtualLanceBuffer
+                    );
+
+                DbgPrint("lancepci: send adapter=%p queued length=%lu ring=%u available=%u completed=%lu dma=0x%06lx expected=0x%06lx flags=0x%02x prefix=%lu nonzero=%lu sum=0x%08lx firstNonzero=%lu\n",
                          Adapter, TotalVirtualLength, RingIndex,
-                         Adapter->NumberOfAvailableRings, Adapter->Transmit);
+                         Adapter->NumberOfAvailableRings, Adapter->Transmit,
+                         DescriptorAddress,
+                         ExpectedAddress,
+                         (UINT)CurrentRingElement->TransmitSummaryBits,
+                         BufferSummary.BytesExamined,
+                         BufferSummary.NonZeroBytes,
+                         BufferSummary.Checksum,
+                         BufferSummary.FirstNonZeroOffset);
             }
             Status = NDIS_STATUS_SUCCESS;
 

@@ -4069,9 +4069,36 @@ Return Value:
 
                 if (LanceTraceSample(&Adapter->TraceReceives))
                 {
-                    DbgPrint("lancepci: receive adapter=%p length=%u first=%u last=%u count=%lu\n",
+                    PLANCE_RECEIVE_ENTRY FirstEntry =
+                        Adapter->ReceiveRing + Adapter->CurrentReceiveIndex;
+                    ULONG DescriptorAddress =
+                        ((ULONG)FirstEntry->HighReceiveBufferAddress << 16) |
+                        FirstEntry->LowReceiveBufferAddress;
+                    ULONG ExpectedAddress =
+                        LANCE_GET_HARDWARE_PHYSICAL_ADDRESS(
+                            Adapter,
+                            Adapter->ReceiveVAs[Adapter->CurrentReceiveIndex]
+                            );
+                    ULONG BufferLength =
+                        (PacketSize < Adapter->SizeOfReceiveBuffer) ?
+                        PacketSize : Adapter->SizeOfReceiveBuffer;
+                    LANCE_TRACE_BUFFER_SUMMARY BufferSummary;
+
+                    LanceTraceBufferSummary(
+                        (const UCHAR *)Adapter->ReceiveVAs[Adapter->CurrentReceiveIndex],
+                        BufferLength,
+                        &BufferSummary
+                        );
+
+                    DbgPrint("lancepci: receive adapter=%p length=%u first=%u last=%u count=%lu dma=0x%06lx expected=0x%06lx endFlags=0x%02x prefix=%lu nonzero=%lu sum=0x%08lx firstNonzero=%lu\n",
                              Adapter, PacketSize, Adapter->CurrentReceiveIndex,
-                             CurrentIndex, Adapter->Receive);
+                             CurrentIndex, Adapter->Receive,
+                             DescriptorAddress, ExpectedAddress,
+                             (UINT)ReceiveSummaryBits,
+                             BufferSummary.BytesExamined,
+                             BufferSummary.NonZeroBytes,
+                             BufferSummary.Checksum,
+                             BufferSummary.FirstNonZeroOffset);
                 }
                 LOG(INDICATE);
 
