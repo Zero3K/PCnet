@@ -186,13 +186,20 @@ Return Value:
     // Could have a null packet.
     //
 
-    if (DestinationBufferCount) {
+    if (DestinationBufferCount && DestinationCurrentBuffer) {
 
-        NdisQueryBuffer(
+        DestinationCurrentLength = 0;
+        DestinationVirtualAddress = NdisQueryBufferSafe(
                     DestinationCurrentBuffer,
                     &DestinationVirtualAddress,
-                    &DestinationCurrentLength
+                    &DestinationCurrentLength,
+                    NormalPagePriority
                     );
+
+        if ((DestinationVirtualAddress == NULL) &&
+            (DestinationCurrentLength != 0)) {
+            goto TransferDataComplete;
+        }
 
         //
         // Get the information for the first buffer of the source.
@@ -244,11 +251,17 @@ Return Value:
 
                 }
 
-                NdisQueryBuffer(
+                DestinationCurrentLength = 0;
+                DestinationVirtualAddress = NdisQueryBufferSafe(
                                 DestinationCurrentBuffer,
                                 &DestinationVirtualAddress,
-                                &DestinationCurrentLength
+                                &DestinationCurrentLength,
+                                NormalPagePriority
                                 );
+                if ((DestinationVirtualAddress == NULL) &&
+                    (DestinationCurrentLength != 0)) {
+                    break;
+                }
                 continue;
 
             }
@@ -383,6 +396,7 @@ Return Value:
 
     }
 
+TransferDataComplete:
     LANCE_DO_DEFERRED(Adapter);
 
     return NDIS_STATUS_SUCCESS;
