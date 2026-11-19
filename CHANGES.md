@@ -110,7 +110,6 @@ These are out of scope or need a decision first:
 
 - **No link-state reporting.** There is no `OID_GEN_MEDIA_CONNECT_STATUS` and no `NDIS_STATUS_MEDIA_CONNECT`/`DISCONNECT` indication, so the OS always shows the cable as connected. Fixing this needs a CheckForHang handler that polls the link state (BCR4 LNKST on 79C970A and later). That is new functionality.
 - **No CheckForHang handler.** A wedged chip is never detected or reset.
-- **Link speed hardcoded to 10 Mbps** in `OID_GEN_LINK_SPEED`, although the 79C971 and later parts run at 100 Mbps.
 - **Not 64-bit clean.** `IoPortBase` is a `ULONG`, and there are pointer/ULONG casts. The INF is x86-only for that reason.
 - **`NdisQueryBuffer`** is used in the send and transfer paths. It maps through `MmMapLockedPages` and bugchecks if the mapping fails under low memory. `NdisQueryBufferSafe` is the NDIS 5.1 replacement.
 - **Filter and multicast sets fail while a MAC-issued reset is in progress** (they return FAILURE instead of pending). This is rare, but a protocol may report the failure.
