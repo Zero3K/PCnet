@@ -21,6 +21,7 @@ DriverVer   = 11/18/2026,1.0.0.0
 
 [AMD.NTx86]
 %PCNTN5M_PCNET.DeviceDesc% = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2000
+%PCNTN5M_HOME.DeviceDesc%  = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2001
 
 [PCNTN5M_PCI.ndi]
 Characteristics = 0x4   ; NCF_PHYSICAL
@@ -69,3 +70,4 @@ AMD                       = "AMD"
 DiskName                  = "pcntn5m driver disk"
 PCNTN5M.Service.DispName  = "AMD PCnet NDIS 5.1 miniport (pcntn5m)"
 PCNTN5M_PCNET.DeviceDesc  = "AMD PCnet-PCI/FAST Ethernet Adapter (Am79C970, Am79C970A, Am79C971, Am79C972, Am79C973, Am79C975)"
+PCNTN5M_HOME.DeviceDesc   = "AMD PCnet-Home Ethernet Adapter (Am79C978)"

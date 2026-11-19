@@ -109,7 +109,7 @@ If a test fails, keep the debug output and note the test number. A `!analyze -v`
 
 ## 6. Not covered by the VM
 
-VirtualBox only emulates the 79C970A and 79C973. The supported 79C970, 79C971 (PCnet-FAST), 79C972 (PCnet-FAST+) and 79C975 need real cards. The 79C978 PCnet-Home is not supported because its HomePNA PHY selection is not handled; its `1022:2001` ID is deliberately omitted from the INF.
+VirtualBox only emulates the 79C970A and 79C973. The 79C970, 79C971 (PCnet-FAST), 79C972 (PCnet-FAST+), 79C975 and 79C978 PCnet-Home need real cards. The 79C978 is listed in the INF as `1022:2001`; its PHY selection is left at its EEPROM setting and must be validated on the target hardware.
 
 ## 7. Windows XP x86 and Windows 7 x86 runs
 

@@ -85,7 +85,7 @@ Each entry gives what was wrong, what changed, and how to verify it. The test nu
 ## Untested
 
 - **Everything except build.** No change on this branch has been run yet. TESTING.md is the plan. (Master itself has been reported working on Server 2003 and getting no DHCP address on Windows 7.)
-- **Am79C970, 79C971 (PCnet-FAST), 79C972 (PCnet-FAST+), and 79C975.** VirtualBox emulates only the 79C970A and 79C973, so these need real cards. The 79C971/972/975 should behave like the 79C973 in 16-bit mode. The original 79C970 is identified by part 0x2420/0x2430, but the 0x2430 mapping is from memory and should be checked against a real chip. The 79C978 (PCnet-Home) is not supported: its HomePNA PHY selection is not handled, so its `1022:2001` ID is not included in the INF or PCI match.
+- **Am79C970, 79C971 (PCnet-FAST), 79C972 (PCnet-FAST+), 79C975 and 79C978 (PCnet-Home).** VirtualBox emulates only the 79C970A and 79C973, so these need real cards. The 79C971/972/975 should behave like the 79C973 in 16-bit mode. The original 79C970 is identified by part 0x2420/0x2430, but the 0x2430 mapping is from memory and should be checked against a real chip. The 79C978 is matched on `1022:2001`; its BCR18 PHY selection is left at its EEPROM setting, so operation with the intended PHY needs validation on real hardware.
 - **Windows Server 2003 x86, Windows XP x86, Windows 7 x86.** These are supported targets, since all three load NDIS 5.1 miniports. TESTING.md section 7 has an XP and Windows 7 run of the same checklist. None of them has been run yet.
 - **SMP.** The ISR/RAP synchronization is written for SMP but has only been reviewed.
 
