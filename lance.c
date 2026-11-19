@@ -3241,7 +3241,7 @@ Return Value:
 
             UINT CurrentCRCHigh = CRCValue >> 31;
 
-            CRCValue <<= 1;
+            CRCValue = (CRCValue & 0x7fffffff) << 1;
 
             if (CurrentCRCHigh ^ (CurrentByte & 0x01)) {
 
