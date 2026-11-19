@@ -1216,13 +1216,7 @@ Return Value:
                 (ULONG)Adapter->IoPortBase
                 );
 
-            NdisMFreeSharedMemory(
-                Adapter->MiniportAdapterHandle,
-                Adapter->AmountOfHardwareMemory,
-                FALSE,
-                Adapter->MmMappedBaseAddr,
-                Adapter->SharedMemoryPhysicalAddress
-                );
+            MmFreeContiguousMemory(Adapter->MmMappedBaseAddr);
             Adapter->SharedMemoryAllocated = FALSE;
 
             DeleteAdapterMemory(Adapter);
@@ -1239,6 +1233,17 @@ Return Value:
 
         LanceSyncStopChip(Adapter);
 
+        //
+        // The timer is set from the DPC (LANCE_DO_DEFERRED), so it has to
+        // exist before the interrupt can fire.
+        //
+
+        NdisMInitializeTimer(
+            &Adapter->DeferredTimer,
+            Adapter->MiniportAdapterHandle,
+            LanceDeferredTimerRoutine,
+            (PVOID)Adapter
+            );
 
         //
         // Initialize the interrupt.
@@ -1279,22 +1284,32 @@ Return Value:
                 0
                 );
 
+            //
+            // The chip may still be running the INIT we gave it, with the
+            // init block and rings in shared memory.  Stop it, then take
+            // the interrupt away, and only then free the memory it could
+            // be DMAing to.
+            //
+
+            NdisMSynchronizeWithInterrupt(
+                &Adapter->Interrupt,
+                LanceSyncStopChip,
+                (PVOID)Adapter
+                );
+
+            NdisMDeregisterInterrupt(&Adapter->Interrupt);
+
+            {
+                BOOLEAN TimerCancelled;
+                NdisMCancelTimer(&Adapter->DeferredTimer, &TimerCancelled);
+            }
+
             MmFreeContiguousMemory(Adapter->MmMappedBaseAddr);
             Adapter->SharedMemoryAllocated = FALSE;
 
             DeleteAdapterMemory(Adapter);
 
-            NdisMDeregisterInterrupt(&Adapter->Interrupt);
-
         }
-
-        NdisMInitializeTimer(
-            &Adapter->DeferredTimer,
-            Adapter->MiniportAdapterHandle,
-            LanceDeferredTimerRoutine,
-            (PVOID)Adapter
-            );
-
 
         return Status;
 
