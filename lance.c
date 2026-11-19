@@ -214,6 +214,12 @@ LanceIdentifyChip(
     IN PLANCE_ADAPTER Adapter
     );
 
+STATIC
+VOID
+LanceConfigureChip(
+    IN PLANCE_ADAPTER Adapter
+    );
+
 VOID
 RelinquishReceivePacket(
     IN PLANCE_ADAPTER Adapter,
@@ -899,6 +905,60 @@ LanceIdentifyChip(
              Adapter->InterruptNumber);
 }
 
+#pragma NDIS_PAGEABLE_FUNCTION(LanceConfigureChip)
+
+STATIC
+VOID
+LanceConfigureChip(
+    IN PLANCE_ADAPTER Adapter
+    )
+{
+    USHORT Bcr18;
+
+    //
+    // CSR4: enable DMAPLUS but keep the reset-default masks for the
+    // missed-frame and collision counter overflow, transmit start and
+    // jabber interrupts.  Nothing in this driver services or clears those
+    // CSR4 status bits, so an unmasked source would hold INTR, and with
+    // it the level-triggered interrupt line, asserted for good.  CSR4 and
+    // BCR18 survive STOP, so this is done once, after reset.
+    //
+    LANCE_WRITE_RAP(Adapter, LANCE_SELECT_CSR4);
+    LANCE_WRITE_RDP(Adapter,
+                    (USHORT)(LANCE_CSR4_DMAPLUS |
+                             LANCE_CSR4_MFCOM |
+                             LANCE_CSR4_RCVCCOM |
+                             LANCE_CSR4_TXSTRTM |
+                             LANCE_CSR4_JABM));
+
+    //
+    // BCR18: enable burst reads and writes on the 79C970A and later,
+    // leaving every other field (ROM timing, linear burst count, PHY
+    // select, ...) as the reset/EEPROM set it.  The first-generation
+    // 79C970 and unrecognised parts keep their defaults.
+    //
+    switch (Adapter->ChipPart)
+    {
+        case PCNET_PART_79C970A:
+        case PCNET_PART_79C971:
+        case PCNET_PART_79C972:
+        case PCNET_PART_79C973:
+        case PCNET_PART_79C975:
+        case PCNET_PART_79C978:
+            LANCE_WRITE_RAP(Adapter, LANCE_SELECT_BCR18);
+            NdisRawReadPortUshort(Adapter->BDP, &Bcr18);
+            Bcr18 &= ~LANCE_BCR18_DWIO;
+            Bcr18 |= LANCE_BCR18_BREADE | LANCE_BCR18_BWRITE;
+            NdisRawWritePortUshort(Adapter->BDP, Bcr18);
+            break;
+
+        default:
+            break;
+    }
+
+    LANCE_WRITE_RAP(Adapter, LANCE_SELECT_CSR0);
+}
+
 #pragma NDIS_PAGEABLE_FUNCTION(LanceRegisterAdapter)
 
 NDIS_STATUS
@@ -1086,10 +1146,12 @@ Return Value:
 
         NdisRawReadPortUshort(Adapter->IoPortBase + 0x14, &ResetValue);
         NdisStallExecution(1000);
-        NdisRawWritePortUshort(Adapter->RAP, 20);
+        NdisRawWritePortUshort(Adapter->RAP, LANCE_SELECT_BCR20);
         NdisRawWritePortUshort(Adapter->BDP, 0);
 
         LanceIdentifyChip(Adapter);
+
+        LanceConfigureChip(Adapter);
 
         LanceSyncStopChip(Adapter);
 
@@ -1192,12 +1254,6 @@ Return Value:
 
 {
     UINT i;
-
-    LANCE_WRITE_RAP(Adapter, 4);
-    LANCE_WRITE_RDP(Adapter, 0x4000);
-
-    LANCE_WRITE_RAP(Adapter, 18);
-    NdisRawWritePortUshort(Adapter->BDP, 0x0060);
 
     SetInitBlockAndInit(Adapter);
 

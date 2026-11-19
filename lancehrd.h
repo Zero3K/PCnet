@@ -39,8 +39,28 @@ Notes:
 #define LANCE_SELECT_CSR0 ((USHORT)0)
 #define LANCE_SELECT_CSR1 ((USHORT)1)
 #define LANCE_SELECT_CSR2 ((USHORT)2)
+#define LANCE_SELECT_CSR4  ((USHORT)4)
 #define LANCE_SELECT_CSR88 ((USHORT)88)
 #define LANCE_SELECT_CSR89 ((USHORT)89)
+#define LANCE_SELECT_BCR18 ((USHORT)18)
+#define LANCE_SELECT_BCR20 ((USHORT)20)
+
+//
+// CSR4 (test and features control).  The xxxM bits mask the matching
+// interrupt sources; all four are set after reset (0x0115).
+//
+#define LANCE_CSR4_DMAPLUS  ((USHORT)0x4000)
+#define LANCE_CSR4_MFCOM    ((USHORT)0x0100)
+#define LANCE_CSR4_RCVCCOM  ((USHORT)0x0010)
+#define LANCE_CSR4_TXSTRTM  ((USHORT)0x0004)
+#define LANCE_CSR4_JABM     ((USHORT)0x0001)
+
+//
+// BCR18 (burst and bus control).
+//
+#define LANCE_BCR18_DWIO    ((USHORT)0x0080)
+#define LANCE_BCR18_BREADE  ((USHORT)0x0040)
+#define LANCE_BCR18_BWRITE  ((USHORT)0x0020)
 
 //
 // Every PCnet-PCI/FAST part enumerates as 1022:2000; the Am79C978
