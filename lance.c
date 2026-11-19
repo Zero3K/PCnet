@@ -257,6 +257,12 @@ SetInitBlockAndInit(
     IN PLANCE_ADAPTER Adapter
     );
 
+STATIC
+BOOLEAN
+LanceSyncStartInit(
+    IN PVOID Context
+    );
+
 VOID
 StartAdapterReset(
     IN PLANCE_ADAPTER Adapter
@@ -1185,6 +1191,8 @@ Return Value:
 --*/
 
 {
+    UINT i;
+
     LANCE_WRITE_RAP(Adapter, 4);
     LANCE_WRITE_RDP(Adapter, 0x4000);
 
@@ -1193,6 +1201,16 @@ Return Value:
 
     SetInitBlockAndInit(Adapter);
 
+    //
+    // LanceIsr clears FirstInitialization when it sees IDON.  Initializing
+    // takes microseconds; give up after about half a second.
+    //
+    for (i = 0;
+         (i < 50) && *(volatile BOOLEAN *)&Adapter->FirstInitialization;
+         i++)
+    {
+        NdisMSleep(10000);
+    }
 
     //
     // The only way that first initialization could have
@@ -1302,45 +1320,74 @@ Return Value:
     //
     PLANCE_ADAPTER Adapter = Context;
 
+    //
+    // Holds the RAP value of whatever we interrupted.
+    //
+    USHORT SavedRap;
+
     LOG(IN_ISR);
 
     *QueueDpc = FALSE;
     *InterruptRecognized = FALSE;
 
     //
-    // We don't need to select csr0, as the only way we could get
-    // an interrupt is to have already selected 0.
+    // The PCI interrupt line can be shared, so this runs for other
+    // devices' interrupts too.  Every RAP change outside this routine
+    // happens before the interrupt is connected or under
+    // NdisMSynchronizeWithInterrupt, so RAP is normally CSR0 here; save
+    // and restore it anyway.
     //
+    NdisRawReadPortUshort(Adapter->RAP, &SavedRap);
+    LANCE_ISR_WRITE_RAP(Adapter, LANCE_SELECT_CSR0);
     LANCE_ISR_READ_RDP(Adapter, &LocalCSR0Value);
-    if (LocalCSR0Value & LANCE_CSR0_INTERRUPT_FLAG)
+
+    //
+    // 0xffff means the device is gone; INTR clear means it isn't ours.
+    //
+    if ((LocalCSR0Value == 0xffff) ||
+        !(LocalCSR0Value & LANCE_CSR0_INTERRUPT_FLAG))
     {
-        *InterruptRecognized = TRUE;
-
-        //
-        // It's our interrupt. Clear only those bits that we got
-        // in this read of csr0.  We do it this way incase any new
-        // reasons for interrupts occur between the time that we
-        // read csr0 and the time that we clear the bits.
-        //
-        LANCE_ISR_WRITE_RDP(
-            Adapter,
-            (USHORT)((LANCE_CSR0_CLEAR_INTERRUPT_BITS & LocalCSR0Value) |
-               LANCE_CSR0_INTERRUPT_ENABLE)
-        );
-        if (Adapter->FirstInitialization &&
-            (LocalCSR0Value & LANCE_CSR0_INITIALIZATION_DONE)
-        )
-        {
-            Adapter->FirstInitialization = FALSE;
-            LocalCSR0Value &= ~LANCE_CSR0_INITIALIZATION_DONE;
-        }
-
-        if (LocalCSR0Value & LANCE_CSR0_CLEAR_INTERRUPT_BITS)
-        {
-            Adapter->PendingInterruptStatus |= LocalCSR0Value;
-            *QueueDpc = TRUE;
-        }
+        LANCE_ISR_WRITE_RAP(Adapter, SavedRap);
+        LOG(OUT_ISR);
+        return;
     }
+
+    *InterruptRecognized = TRUE;
+
+    //
+    // It's our interrupt. Clear only those bits that we got in this
+    // read of csr0, which drops the level-triggered line.  New causes
+    // that arrive after the read stay set and interrupt again.
+    //
+    LANCE_ISR_WRITE_RDP(
+        Adapter,
+        (USHORT)((LANCE_CSR0_CLEAR_INTERRUPT_BITS & LocalCSR0Value) |
+           LANCE_CSR0_INTERRUPT_ENABLE)
+    );
+
+    //
+    // During MiniportInitialize, LanceInitialInit waits for IDON
+    // through FirstInitialization.
+    //
+    if (Adapter->FirstInitialization &&
+        (LocalCSR0Value & LANCE_CSR0_INITIALIZATION_DONE)
+    )
+    {
+        Adapter->FirstInitialization = FALSE;
+        LocalCSR0Value &= ~LANCE_CSR0_INITIALIZATION_DONE;
+    }
+
+    //
+    // Hand the acknowledged causes to LanceHandleInterrupt, which
+    // collects them with LanceSyncReadInterruptStatus.
+    //
+    if (LocalCSR0Value & LANCE_CSR0_CLEAR_INTERRUPT_BITS)
+    {
+        Adapter->PendingInterruptStatus |= LocalCSR0Value;
+        *QueueDpc = TRUE;
+    }
+
+    LANCE_ISR_WRITE_RAP(Adapter, SavedRap);
 
     LOG(OUT_ISR);
 
@@ -4149,13 +4196,32 @@ Return Value:
 
 --*/
 {
-
-    ULONG PhysAdr;
-
     //
     // Fill in the adapters initialization block.
     //
     LanceSetInitializationBlock(Adapter);
+
+    //
+    // Selecting CSR1/CSR2 moves RAP away from CSR0, so do it with the ISR
+    // locked out on every processor.  IDON is reported by interrupt:
+    // LanceInitialInit waits for it, the reset path handles it in
+    // LanceHandleInterrupt.
+    //
+    NdisMSynchronizeWithInterrupt(
+        &Adapter->Interrupt,
+        LanceSyncStartInit,
+        (PVOID)Adapter
+    );
+}
+
+STATIC
+BOOLEAN
+LanceSyncStartInit(
+    IN PVOID Context
+    )
+{
+    PLANCE_ADAPTER Adapter = (PLANCE_ADAPTER)Context;
+    ULONG PhysAdr;
 
     PhysAdr = LANCE_GET_HARDWARE_PHYSICAL_ADDRESS(Adapter,Adapter->InitBlock);
 
@@ -4178,11 +4244,7 @@ Return Value:
     LANCE_WRITE_RAP(Adapter, LANCE_SELECT_CSR0);
     LANCE_WRITE_RDP(Adapter, LANCE_CSR0_INIT_CHIP);
 
-    //
-    // Delay execution for 1/2 second to give the lance
-    // time to initialize.
-    //
-    NdisStallExecution( 500000 );
+    return(FALSE);
 }
 
 STATIC
