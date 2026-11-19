@@ -33,7 +33,14 @@ Notes:
 #define _LANCESFT_
 
 #define LANCE_NDIS_MAJOR_VERSION 5
-#define LANCE_NDIS_MINOR_VERSION 0
+#define LANCE_NDIS_MINOR_VERSION 1
+
+//
+// Size of the multicast address table in the adapter structure, and so
+// the most addresses OID_802_3_MULTICAST_LIST can ever accept.  The
+// MaxMulticastList registry value can lower this, not raise it.
+//
+#define LANCE_MAX_MULTICAST_LIST 32
 
 #if DBG
 
@@ -348,6 +355,14 @@ typedef struct _LANCE_ADAPTER {
     NDIS_PHYSICAL_ADDRESS SharedMemoryPhysicalAddress;
 
     //
+    // PCI device ID, and the chip ID read from CSR88/CSR89 after reset.
+    //
+    USHORT PciDeviceId;
+    USHORT ChipPart;
+    ULONG ChipId;
+    const char *ChipName;
+
+    //
     // Address in memory of the network address
     //
     ULONG NetworkHardwareAddress;
@@ -563,9 +578,14 @@ typedef struct _LANCE_ADAPTER {
     BOOLEAN ResetInitStarted;
 
     //
-    // The type of the request that caused the adapter to reset.
+    // What the reinitialization in progress has to complete when IDON
+    // arrives.  These are separate flags rather than one "request type"
+    // because a MAC-issued reset (memory error, transmitter stopped) can
+    // start while a set-information request is still pending, and that
+    // request must still be completed.
     //
-    NDIS_REQUEST_TYPE ResetRequestType;
+    BOOLEAN SetInformationPending;  // NdisMSetInformationComplete owed
+    BOOLEAN ResetPending;           // NdisMResetComplete owed
 
     //
     // During an indication this is set to the current indications context
@@ -601,13 +621,19 @@ typedef struct _LANCE_ADAPTER {
     BOOLEAN HardwareFailure;
 
     //
+    // Set by the PnP event handler when the device has been surprise
+    // removed; the hardware must not be touched after that.
+    //
+    BOOLEAN SurpriseRemoved;
+
+    //
     // Lookahead buffer for loopback packets
     //
     UCHAR Lookahead[LANCE_MAX_LOOKAHEAD + LANCE_HEADER_SIZE];
 
     UINT PacketFilter;
     UINT NumberOfAddresses;
-    UCHAR MulticastAddresses[32][LANCE_LENGTH_OF_ADDRESS];
+    UCHAR MulticastAddresses[LANCE_MAX_MULTICAST_LIST][LANCE_LENGTH_OF_ADDRESS];
 
 } LANCE_ADAPTER,*PLANCE_ADAPTER;
 
@@ -817,6 +843,19 @@ LanceEnableInterrupt(
 VOID
 LanceHalt(
     IN PVOID MiniportAdapterContext
+    );
+
+VOID
+LanceShutdown(
+    IN PVOID ShutdownContext
+    );
+
+VOID
+LancePnPEventNotify(
+    IN NDIS_HANDLE MiniportAdapterContext,
+    IN NDIS_DEVICE_PNP_EVENT PnPEvent,
+    IN PVOID InformationBuffer,
+    IN ULONG InformationBufferLength
     );
 
 VOID

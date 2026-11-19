@@ -1,0 +1,73 @@
+; lancepci.inf
+;
+; AMD PCnet-PCI / PCnet-FAST family (Am79C970, 970A, 971, 972, 973, 975)
+; and Am79C978 PCnet-Home, NDIS 5.1 miniport. The chip runs in 16-bit
+; LANCE mode (SWSTYLE 0) with 24-bit DMA.
+;
+; Targets: Windows Server 2003 x86, Windows XP x86, Windows 7 x86 and
+; ReactOS x86 (all load NDIS 5.1 miniports).
+; x86 only: the driver is not 64-bit clean, so there is no NTamd64 section.
+; Not for Windows 8, 10 or 11: those no longer load NDIS 5.x miniports.
+
+[Version]
+Signature   = "$Windows NT$"
+Class       = Net
+ClassGUID   = {4d36e972-e325-11ce-bfc1-08002be10318}
+Provider    = %Provider%
+DriverVer   = 11/18/2026,1.0.0.0
+
+[Manufacturer]
+%AMD% = AMD, NTx86
+
+[AMD.NTx86]
+%LANCEPCI_PCNET.DeviceDesc% = LANCEPCI_PCI.ndi, PCI\VEN_1022&DEV_2000
+%LANCEPCI_HOME.DeviceDesc%  = LANCEPCI_PCI.ndi, PCI\VEN_1022&DEV_2001
+
+[LANCEPCI_PCI.ndi]
+Characteristics = 0x4   ; NCF_PHYSICAL
+BusType         = 5     ; PCIBus
+AddReg          = LANCEPCI_PCI.ndi.reg
+CopyFiles       = LANCEPCI.CopyFiles
+
+[LANCEPCI_PCI.ndi.Services]
+AddService = LANCEPCI, 2, LANCEPCI.Service, LANCEPCI.EventLog
+
+[LANCEPCI_PCI.ndi.reg]
+HKR, Ndi,            Service,    0, "LANCEPCI"
+HKR, Ndi\Interfaces, UpperRange, 0, "ndis5"
+HKR, Ndi\Interfaces, LowerRange, 0, "ethernet"
+
+[LANCEPCI.Service]
+DisplayName    = %LANCEPCI.Service.DispName%
+ServiceType    = 1      ; SERVICE_KERNEL_DRIVER
+StartType      = 3      ; SERVICE_DEMAND_START
+ErrorControl   = 1      ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %12%\lancepci.sys
+LoadOrderGroup = NDIS
+
+[LANCEPCI.EventLog]
+AddReg = LANCEPCI.EventLog.reg
+
+[LANCEPCI.EventLog.reg]
+HKR, , EventMessageFile, 0x00020000, "%%SystemRoot%%\System32\netevent.dll"
+HKR, , TypesSupported,   0x00010001, 7
+
+[LANCEPCI.CopyFiles]
+lancepci.sys
+
+[DestinationDirs]
+LANCEPCI.CopyFiles = 12
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+lancepci.sys = 1
+
+[Strings]
+Provider                  = "lancepci"
+AMD                       = "AMD"
+DiskName                  = "lancepci driver disk"
+LANCEPCI.Service.DispName = "AMD PCnet LANCE-mode NDIS miniport (lancepci)"
+LANCEPCI_PCNET.DeviceDesc = "AMD PCnet-PCI/FAST Ethernet Adapter (lancepci)"
+LANCEPCI_HOME.DeviceDesc  = "AMD PCnet-Home Am79C978 Ethernet Adapter (lancepci)"

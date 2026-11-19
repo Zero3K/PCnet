@@ -9,7 +9,7 @@ Module Name:
 Abstract:
 
     This is the main file for the Advanced Micro Devices LANCE (Am 7990)
-    Ethernet controller.  This driver conforms to the NDIS 5.0 interface.
+    Ethernet controller.  This driver conforms to the NDIS 5.1 interface.
 
     The idea for handling loopback and sends simultaneously is largely
     adapted from the EtherLink II NDIS driver by Adam Barr.
@@ -208,6 +208,24 @@ LanceQueryPciResources(
     IN PLANCE_ADAPTER Adapter
     );
 
+STATIC
+VOID
+LanceIdentifyChip(
+    IN PLANCE_ADAPTER Adapter
+    );
+
+STATIC
+VOID
+LanceConfigureChip(
+    IN PLANCE_ADAPTER Adapter
+    );
+
+STATIC
+BOOLEAN
+LanceCheckWioMode(
+    IN PLANCE_ADAPTER Adapter
+    );
+
 VOID
 RelinquishReceivePacket(
     IN PLANCE_ADAPTER Adapter,
@@ -249,6 +267,12 @@ LanceSetInitializationBlock(
 VOID
 SetInitBlockAndInit(
     IN PLANCE_ADAPTER Adapter
+    );
+
+STATIC
+BOOLEAN
+LanceSyncStartInit(
+    IN PVOID Context
     );
 
 VOID
@@ -343,6 +367,14 @@ Return Value:
     LanceChar.SetInformationHandler = LanceSetInformation;
     LanceChar.TransferDataHandler = LanceTransferData;
 
+    //
+    // NDIS 5.1 additions.  There is no SendPackets handler, so there is
+    // nothing for CancelSendPackets to cancel.
+    //
+    LanceChar.AdapterShutdownHandler = LanceShutdown;
+    LanceChar.PnPEventNotifyHandler = LancePnPEventNotify;
+    LanceChar.CancelSendPacketsHandler = NULL;
+
     Status = NdisMRegisterMiniport(
                  NdisWrapperHandle,
                  &LanceChar,
@@ -377,7 +409,7 @@ Routine Description:
 
 Arguments:
 
-    See NDIS 5.0 Miniport spec.
+    See NDIS 5.1 Miniport spec.
 
 Return Value:
 
@@ -450,8 +482,9 @@ Return Value:
     Adapter->BeingRemoved = FALSE;
 
     //
-    // The PCI IDs in the INF bind only PCnet devices. Read the device ID
-    // here, then use NDIS-assigned resources for its port and interrupt.
+    // Every PCnet-PCI/FAST part enumerates as 1022:2000 (Am79C978 HomePNA
+    // as 1022:2001).  The chip itself is identified from CSR88/CSR89 once
+    // it has been reset, in LanceRegisterAdapter.
     //
     PciId = 0;
     if (NdisReadPciSlotInformation(
@@ -460,16 +493,11 @@ Return Value:
             0,
             &PciId,
             sizeof(PciId)) == sizeof(PciId) &&
-        (PciId & 0xffff) == 0x1022 &&
-        (((PciId >> 16) == 0x2000) ||
-         ((PciId >> 16) == 0x2001) ||
-         ((PciId >> 16) == 0x2621) ||
-         ((PciId >> 16) == 0x2623) ||
-         ((PciId >> 16) == 0x2624) ||
-         ((PciId >> 16) == 0x2625) ||
-         ((PciId >> 16) == 0x2626) ||
-         ((PciId >> 16) == 0x2627)))
+        (USHORT)(PciId & 0xffff) == PCNET_PCI_VENDOR_ID &&
+        ((USHORT)(PciId >> 16) == PCNET_PCI_DEVICE_ID ||
+         (USHORT)(PciId >> 16) == PCNET_HOME_PCI_DEVICE_ID))
     {
+        Adapter->PciDeviceId = (USHORT)(PciId >> 16);
         PciCommand = 0;
 
         if (NdisReadPciSlotInformation(
@@ -541,9 +569,9 @@ Return Value:
     if (Status == NDIS_STATUS_SUCCESS)
     {
         MaxMulticastList = ReturnedValue->ParameterData.IntegerData;
-        if (MaxMulticastList > 0xff)
+        if (MaxMulticastList > LANCE_MAX_MULTICAST_LIST)
         {
-            MaxMulticastList = 0xff;
+            MaxMulticastList = LANCE_MAX_MULTICAST_LIST;
         }
     }
 
@@ -678,40 +706,137 @@ Return Value:
 {
 
     PLANCE_ADAPTER Adapter;
+    BOOLEAN TimerCancelled;
 
     Adapter = PLANCE_ADAPTER_FROM_CONTEXT_HANDLE(MiniportAdapterContext);
 
     LOG(REMOVE);
 
     //
-    // bug 2275
+    // 1. Stop the chip, synchronized with the ISR so the RAP write cannot
+    //    land between the ISR's RAP save and restore on another CPU.
+    //    After a surprise removal there is no chip to stop.
     //
+    if (!Adapter->SurpriseRemoved)
+    {
+        NdisMSynchronizeWithInterrupt(
+            &Adapter->Interrupt,
+            LanceSyncStopChip,
+            (PVOID)Adapter
+            );
+    }
 
-    LanceSyncStopChip(Adapter);
-
+    //
+    // 2. Disconnect the interrupt.  This also waits for a DPC that is
+    //    already queued or running.
+    //
     NdisMDeregisterInterrupt(&(Adapter->Interrupt));
 
-    NdisMDeregisterIoPortRange(
-        Adapter->MiniportAdapterHandle,
-        Adapter->IoBaseAddr,
-        0x20,
-        (PVOID)(Adapter->IoPortBase)
-        );
+    //
+    // 3. The DPC can arm the deferred timer; make sure it will not fire
+    //    against a freed adapter.
+    //
+    NdisMCancelTimer(&Adapter->DeferredTimer, &TimerCancelled);
 
+    //
+    // 4. With the chip stopped and nothing left to call back into us,
+    //    release the DMA memory, then the map registers that cover it.
+    //
     if (Adapter->SharedMemoryAllocated)
     {
         MmFreeContiguousMemory(Adapter->MmMappedBaseAddr);
+        Adapter->SharedMemoryAllocated = FALSE;
     }
 
     DeleteAdapterMemory(Adapter);
 
     if (Adapter->MapRegistersAllocated) {
         NdisMFreeMapRegisters(Adapter->MiniportAdapterHandle);
+        Adapter->MapRegistersAllocated = FALSE;
+    }
+
+    //
+    // 5. The I/O range goes last: nothing above touches the ports any more.
+    //
+    if (Adapter->IoPortsRegistered) {
+        NdisMDeregisterIoPortRange(
+            Adapter->MiniportAdapterHandle,
+            Adapter->IoBaseAddr,
+            0x20,
+            (PVOID)(Adapter->IoPortBase)
+            );
+        Adapter->IoPortsRegistered = FALSE;
     }
 
     NdisFreeMemory(Adapter, sizeof(LANCE_ADAPTER), 0);
 
     return;
+}
+
+
+VOID
+LanceShutdown(
+    IN PVOID ShutdownContext
+    )
+
+/*++
+
+Routine Description:
+
+    NDIS 5.1 AdapterShutdownHandler.  Called on system shutdown or
+    restart, and possibly from the bugcheck path at high IRQL, so it only
+    touches the chip: no NDIS calls, no locks, no memory is freed.  It
+    stops the chip so that it does no more bus-master DMA into memory the
+    next OS (or the crash dump writer) is about to use.
+
+--*/
+
+{
+    PLANCE_ADAPTER Adapter = PLANCE_ADAPTER_FROM_CONTEXT_HANDLE(ShutdownContext);
+
+    if (Adapter->SurpriseRemoved) {
+        return;
+    }
+
+    NdisRawWritePortUshort(Adapter->RAP, LANCE_SELECT_CSR0);
+    NdisRawWritePortUshort(Adapter->RDP, LANCE_CSR0_STOP);
+}
+
+
+VOID
+LancePnPEventNotify(
+    IN NDIS_HANDLE MiniportAdapterContext,
+    IN NDIS_DEVICE_PNP_EVENT PnPEvent,
+    IN PVOID InformationBuffer,
+    IN ULONG InformationBufferLength
+    )
+
+/*++
+
+Routine Description:
+
+    NDIS 5.1 PnPEventNotifyHandler.  The only event that matters to this
+    driver is surprise removal: after it, the I/O ports read as all ones
+    and LanceHalt must not try to stop the chip.  The power profile
+    notification is informational only.
+
+--*/
+
+{
+    PLANCE_ADAPTER Adapter = PLANCE_ADAPTER_FROM_CONTEXT_HANDLE(MiniportAdapterContext);
+
+    UNREFERENCED_PARAMETER(InformationBuffer);
+    UNREFERENCED_PARAMETER(InformationBufferLength);
+
+    switch (PnPEvent)
+    {
+        case NdisDevicePnPEventSurpriseRemoved:
+            Adapter->SurpriseRemoved = TRUE;
+            break;
+
+        default:
+            break;
+    }
 }
 
 #pragma NDIS_PAGEABLE_FUNCTION(LancePciHardwareDetails)
@@ -832,6 +957,171 @@ LanceQueryPciResources(
     return((IoPortFound && InterruptFound) ?
            NDIS_STATUS_SUCCESS :
            NDIS_STATUS_ADAPTER_NOT_FOUND);
+}
+
+#pragma NDIS_PAGEABLE_FUNCTION(LanceIdentifyChip)
+
+STATIC
+VOID
+LanceIdentifyChip(
+    IN PLANCE_ADAPTER Adapter
+    )
+{
+    USHORT Low;
+    USHORT High;
+
+    LANCE_WRITE_RAP(Adapter, LANCE_SELECT_CSR88);
+    LANCE_READ_RDP(Adapter, &Low);
+    LANCE_WRITE_RAP(Adapter, LANCE_SELECT_CSR89);
+    LANCE_READ_RDP(Adapter, &High);
+    LANCE_WRITE_RAP(Adapter, LANCE_SELECT_CSR0);
+
+    Adapter->ChipId = ((ULONG)High << 16) | Low;
+    Adapter->ChipPart = PCNET_CHIP_PART(Adapter->ChipId);
+
+    switch (Adapter->ChipPart)
+    {
+        case PCNET_PART_79C970:
+        case PCNET_PART_79C970_ALT:
+            Adapter->ChipName = "Am79C970 (PCnet-PCI)";
+            break;
+        case PCNET_PART_79C970A:
+            Adapter->ChipName = "Am79C970A (PCnet-PCI II)";
+            break;
+        case PCNET_PART_79C971:
+            Adapter->ChipName = "Am79C971 (PCnet-FAST)";
+            break;
+        case PCNET_PART_79C972:
+            Adapter->ChipName = "Am79C972 (PCnet-FAST+)";
+            break;
+        case PCNET_PART_79C973:
+            Adapter->ChipName = "Am79C973 (PCnet-FAST III)";
+            break;
+        case PCNET_PART_79C975:
+            Adapter->ChipName = "Am79C975 (PCnet-FAST III)";
+            break;
+        case PCNET_PART_79C978:
+            Adapter->ChipName = "Am79C978 (PCnet-Home)";
+            break;
+        default:
+            Adapter->ChipName = "unknown PCnet";
+            break;
+    }
+
+    DbgPrint("lancepci: %s, chip ID 0x%08lx, PCI 1022:%04x, I/O 0x%lx, IRQ %u\n",
+             Adapter->ChipName,
+             Adapter->ChipId,
+             Adapter->PciDeviceId,
+             Adapter->IoBaseAddr,
+             Adapter->InterruptNumber);
+}
+
+#pragma NDIS_PAGEABLE_FUNCTION(LanceCheckWioMode)
+
+STATIC
+BOOLEAN
+LanceCheckWioMode(
+    IN PLANCE_ADAPTER Adapter
+    )
+
+/*++
+
+Routine Description:
+
+    Confirms, right after the software reset, that the chip is in 16-bit
+    word I/O (WIO) mode: RDP at +0x10, RAP at +0x12, reset at +0x14 and BDP
+    at +0x16, all 16 bits wide.  This driver only ever uses WIO.
+
+    The chip leaves WIO for 32-bit DWIO as soon as anything does a 32-bit
+    write to RDP, and only a hardware reset (PCI RST#) brings it back;
+    reading the reset register does not.  A driver loaded earlier in the
+    same boot (or a boot ROM) can therefore leave the chip in DWIO, where
+    the 16-bit accesses below are undefined.
+
+    After reset the chip is stopped (CSR0 = 0x0004) and RAP is readable,
+    so both are checked.
+
+Return Value:
+
+    TRUE if the chip answers as expected in WIO mode.
+
+--*/
+
+{
+    USHORT Csr0;
+    USHORT Rap;
+
+    NdisRawWritePortUshort(Adapter->RAP, LANCE_SELECT_CSR88);
+    NdisRawReadPortUshort(Adapter->RAP, &Rap);
+
+    NdisRawWritePortUshort(Adapter->RAP, LANCE_SELECT_CSR0);
+    NdisRawReadPortUshort(Adapter->RDP, &Csr0);
+
+    if ((Rap == LANCE_SELECT_CSR88) && (Csr0 == LANCE_CSR0_STOP)) {
+        return TRUE;
+    }
+
+    DbgPrint("lancepci: I/O 0x%lx does not answer in 16-bit WIO mode after "
+             "reset (RAP readback 0x%04x, CSR0 0x%04x).  The chip may have "
+             "been left in 32-bit DWIO mode by another driver; only a "
+             "hardware reset (cold boot) clears that.\n",
+             Adapter->IoPortBase, Rap, Csr0);
+
+    return FALSE;
+}
+
+#pragma NDIS_PAGEABLE_FUNCTION(LanceConfigureChip)
+
+STATIC
+VOID
+LanceConfigureChip(
+    IN PLANCE_ADAPTER Adapter
+    )
+{
+    USHORT Bcr18;
+
+    //
+    // CSR4: enable DMAPLUS but keep the reset-default masks for the
+    // missed-frame and collision counter overflow, transmit start and
+    // jabber interrupts.  Nothing in this driver services or clears those
+    // CSR4 status bits, so an unmasked source would hold INTR, and with
+    // it the level-triggered interrupt line, asserted for good.  CSR4 and
+    // BCR18 survive STOP, so this is done once, after reset.
+    //
+    LANCE_WRITE_RAP(Adapter, LANCE_SELECT_CSR4);
+    LANCE_WRITE_RDP(Adapter,
+                    (USHORT)(LANCE_CSR4_DMAPLUS |
+                             LANCE_CSR4_MFCOM |
+                             LANCE_CSR4_RCVCCOM |
+                             LANCE_CSR4_TXSTRTM |
+                             LANCE_CSR4_JABM));
+
+    //
+    // BCR18: enable burst reads and writes on the 79C970A and later,
+    // leaving every other field (ROM timing, linear burst count, PHY
+    // select, ...) as the reset/EEPROM set it.  The first-generation
+    // 79C970 and unrecognised parts keep their defaults.
+    //
+    switch (Adapter->ChipPart)
+    {
+        case PCNET_PART_79C970A:
+        case PCNET_PART_79C971:
+        case PCNET_PART_79C972:
+        case PCNET_PART_79C973:
+        case PCNET_PART_79C975:
+        case PCNET_PART_79C978:
+            LANCE_WRITE_RAP(Adapter, LANCE_SELECT_BCR18);
+            NdisRawReadPortUshort(Adapter->BDP, &Bcr18);
+            Bcr18 &= ~LANCE_BCR18_DWIO;
+            Bcr18 |= LANCE_BCR18_BREADE | LANCE_BCR18_BWRITE;
+            NdisRawWritePortUshort(Adapter->BDP, Bcr18);
+            break;
+
+        default:
+            break;
+    }
+
+    LANCE_WRITE_RAP(Adapter, LANCE_SELECT_CSR0);
 }
 
 #pragma NDIS_PAGEABLE_FUNCTION(LanceRegisterAdapter)
@@ -1021,11 +1311,44 @@ Return Value:
 
         NdisRawReadPortUshort(Adapter->IoPortBase + 0x14, &ResetValue);
         NdisStallExecution(1000);
-        NdisRawWritePortUshort(Adapter->RAP, 20);
+
+        if (!LanceCheckWioMode(Adapter)) {
+
+            NdisWriteErrorLogEntry(
+                Adapter->MiniportAdapterHandle,
+                NDIS_ERROR_CODE_HARDWARE_FAILURE,
+                1,
+                (ULONG)Adapter->IoPortBase
+                );
+
+            MmFreeContiguousMemory(Adapter->MmMappedBaseAddr);
+            Adapter->SharedMemoryAllocated = FALSE;
+
+            DeleteAdapterMemory(Adapter);
+
+            return NDIS_STATUS_ADAPTER_NOT_FOUND;
+        }
+
+        NdisRawWritePortUshort(Adapter->RAP, LANCE_SELECT_BCR20);
         NdisRawWritePortUshort(Adapter->BDP, 0);
+
+        LanceIdentifyChip(Adapter);
+
+        LanceConfigureChip(Adapter);
 
         LanceSyncStopChip(Adapter);
 
+        //
+        // The timer is set from the DPC (LANCE_DO_DEFERRED), so it has to
+        // exist before the interrupt can fire.
+        //
+
+        NdisMInitializeTimer(
+            &Adapter->DeferredTimer,
+            Adapter->MiniportAdapterHandle,
+            LanceDeferredTimerRoutine,
+            (PVOID)Adapter
+            );
 
         //
         // Initialize the interrupt.
@@ -1066,22 +1389,32 @@ Return Value:
                 0
                 );
 
+            //
+            // The chip may still be running the INIT we gave it, with the
+            // init block and rings in shared memory.  Stop it, then take
+            // the interrupt away, and only then free the memory it could
+            // be DMAing to.
+            //
+
+            NdisMSynchronizeWithInterrupt(
+                &Adapter->Interrupt,
+                LanceSyncStopChip,
+                (PVOID)Adapter
+                );
+
+            NdisMDeregisterInterrupt(&Adapter->Interrupt);
+
+            {
+                BOOLEAN TimerCancelled;
+                NdisMCancelTimer(&Adapter->DeferredTimer, &TimerCancelled);
+            }
+
             MmFreeContiguousMemory(Adapter->MmMappedBaseAddr);
             Adapter->SharedMemoryAllocated = FALSE;
 
             DeleteAdapterMemory(Adapter);
 
-            NdisMDeregisterInterrupt(&Adapter->Interrupt);
-
         }
-
-        NdisMInitializeTimer(
-            &Adapter->DeferredTimer,
-            Adapter->MiniportAdapterHandle,
-            LanceDeferredTimerRoutine,
-            (PVOID)Adapter
-            );
-
 
         return Status;
 
@@ -1124,14 +1457,20 @@ Return Value:
 --*/
 
 {
-    LANCE_WRITE_RAP(Adapter, 4);
-    LANCE_WRITE_RDP(Adapter, 0x4000);
-
-    LANCE_WRITE_RAP(Adapter, 18);
-    NdisRawWritePortUshort(Adapter->BDP, 0x0060);
+    UINT i;
 
     SetInitBlockAndInit(Adapter);
 
+    //
+    // LanceIsr clears FirstInitialization when it sees IDON.  Initializing
+    // takes microseconds; give up after about half a second.
+    //
+    for (i = 0;
+         (i < 50) && *(volatile BOOLEAN *)&Adapter->FirstInitialization;
+         i++)
+    {
+        NdisMSleep(10000);
+    }
 
     //
     // The only way that first initialization could have
@@ -1241,45 +1580,74 @@ Return Value:
     //
     PLANCE_ADAPTER Adapter = Context;
 
+    //
+    // Holds the RAP value of whatever we interrupted.
+    //
+    USHORT SavedRap;
+
     LOG(IN_ISR);
 
     *QueueDpc = FALSE;
     *InterruptRecognized = FALSE;
 
     //
-    // We don't need to select csr0, as the only way we could get
-    // an interrupt is to have already selected 0.
+    // The PCI interrupt line can be shared, so this runs for other
+    // devices' interrupts too.  Every RAP change outside this routine
+    // happens before the interrupt is connected or under
+    // NdisMSynchronizeWithInterrupt, so RAP is normally CSR0 here; save
+    // and restore it anyway.
     //
+    NdisRawReadPortUshort(Adapter->RAP, &SavedRap);
+    LANCE_ISR_WRITE_RAP(Adapter, LANCE_SELECT_CSR0);
     LANCE_ISR_READ_RDP(Adapter, &LocalCSR0Value);
-    if (LocalCSR0Value & LANCE_CSR0_INTERRUPT_FLAG)
+
+    //
+    // 0xffff means the device is gone; INTR clear means it isn't ours.
+    //
+    if ((LocalCSR0Value == 0xffff) ||
+        !(LocalCSR0Value & LANCE_CSR0_INTERRUPT_FLAG))
     {
-        *InterruptRecognized = TRUE;
-
-        //
-        // It's our interrupt. Clear only those bits that we got
-        // in this read of csr0.  We do it this way incase any new
-        // reasons for interrupts occur between the time that we
-        // read csr0 and the time that we clear the bits.
-        //
-        LANCE_ISR_WRITE_RDP(
-            Adapter,
-            (USHORT)((LANCE_CSR0_CLEAR_INTERRUPT_BITS & LocalCSR0Value) |
-               LANCE_CSR0_INTERRUPT_ENABLE)
-        );
-        if (Adapter->FirstInitialization &&
-            (LocalCSR0Value & LANCE_CSR0_INITIALIZATION_DONE)
-        )
-        {
-            Adapter->FirstInitialization = FALSE;
-            LocalCSR0Value &= ~LANCE_CSR0_INITIALIZATION_DONE;
-        }
-
-        if (LocalCSR0Value & LANCE_CSR0_CLEAR_INTERRUPT_BITS)
-        {
-            Adapter->PendingInterruptStatus |= LocalCSR0Value;
-            *QueueDpc = TRUE;
-        }
+        LANCE_ISR_WRITE_RAP(Adapter, SavedRap);
+        LOG(OUT_ISR);
+        return;
     }
+
+    *InterruptRecognized = TRUE;
+
+    //
+    // It's our interrupt. Clear only those bits that we got in this
+    // read of csr0, which drops the level-triggered line.  New causes
+    // that arrive after the read stay set and interrupt again.
+    //
+    LANCE_ISR_WRITE_RDP(
+        Adapter,
+        (USHORT)((LANCE_CSR0_CLEAR_INTERRUPT_BITS & LocalCSR0Value) |
+           LANCE_CSR0_INTERRUPT_ENABLE)
+    );
+
+    //
+    // During MiniportInitialize, LanceInitialInit waits for IDON
+    // through FirstInitialization.
+    //
+    if (Adapter->FirstInitialization &&
+        (LocalCSR0Value & LANCE_CSR0_INITIALIZATION_DONE)
+    )
+    {
+        Adapter->FirstInitialization = FALSE;
+        LocalCSR0Value &= ~LANCE_CSR0_INITIALIZATION_DONE;
+    }
+
+    //
+    // Hand the acknowledged causes to LanceHandleInterrupt, which
+    // collects them with LanceSyncReadInterruptStatus.
+    //
+    if (LocalCSR0Value & LANCE_CSR0_CLEAR_INTERRUPT_BITS)
+    {
+        Adapter->PendingInterruptStatus |= LocalCSR0Value;
+        *QueueDpc = TRUE;
+    }
+
+    LANCE_ISR_WRITE_RAP(Adapter, SavedRap);
 
     LOG(OUT_ISR);
 
@@ -1479,7 +1847,8 @@ Return Value:
             // request on its own.  It could do that if there
             // were some sort of error.
             //
-            NDIS_REQUEST_TYPE ResetRequestType;
+            BOOLEAN CompleteSetInformation;
+            BOOLEAN CompleteReset;
 
             LOG(RESET_STEP_3);
 
@@ -1491,41 +1860,50 @@ Return Value:
             Adapter->ResetInitStarted = FALSE;
 
             //
-            // We save off the open that caused this reset incase
-            // we get *another* reset while we're indicating the
-            // last reset is done.
+            // Take a copy and clear the flags first: completing a request
+            // can lead NDIS straight back into us with another one that
+            // starts a new reset.
             //
-            ResetRequestType = Adapter->ResetRequestType;
+            CompleteSetInformation = Adapter->SetInformationPending;
+            CompleteReset = Adapter->ResetPending;
+            Adapter->SetInformationPending = FALSE;
+            Adapter->ResetPending = FALSE;
 
+            //
+            // Restart the chip before completing anything, so that a
+            // reset started from inside a completion is not undone by a
+            // late LanceStartChip.
+            //
             LanceStartChip(Adapter);
 
-            if (ResetRequestType == NdisRequestSetInformation)
+            if (CompleteSetInformation)
             {
                 //
-                // It was a request submitted by a protocol.
+                // A filter or multicast change from a protocol.  The new
+                // init block carried it, so it succeeded.
                 //
                 NdisMSetInformationComplete(
                     Adapter->MiniportAdapterHandle,
                     NDIS_STATUS_SUCCESS
                 );
             }
-            else
+
+            if (CompleteReset)
             {
-                //
-                // It was a reset command.
-                //
-                if (ResetRequestType == NdisRequestGeneric1)
-                {
-                    //
-                    // Is was a reset request
-                    //
-                    NdisMResetComplete(
-                        Adapter->MiniportAdapterHandle,
-                        NDIS_STATUS_SUCCESS,
-                        FALSE
-                    );
-                }
+                NdisMResetComplete(
+                    Adapter->MiniportAdapterHandle,
+                    NDIS_STATUS_SUCCESS,
+                    FALSE
+                );
             }
+
+            //
+            // LanceSend returned NDIS_STATUS_RESOURCES for every packet
+            // offered during the reset, and the reset dropped whatever
+            // was on the transmit ring, so no transmit interrupt is
+            // coming to restart NDIS's send queue.  Restart it here.
+            //
+            NdisMSendResourcesAvailable(Adapter->MiniportAdapterHandle);
 
             goto LoopBottom;
         }
@@ -2618,6 +2996,20 @@ Return Value:
 
             }
 
+            //
+            // The list is copied into a fixed table; refuse more entries
+            // than we advertise in OID_802_3_MAXIMUM_LIST_SIZE.
+            //
+
+            if ((OidLength / LANCE_LENGTH_OF_ADDRESS) > Adapter->MaxMulticastList) {
+
+                *BytesRead = 0;
+                *BytesNeeded = 0;
+
+                return( NDIS_STATUS_MULTICAST_FULL );
+
+            }
+
             Status = LanceChangeMulticastAddresses(
                          Adapter,
                          OidLength / LANCE_LENGTH_OF_ADDRESS,
@@ -3417,69 +3809,66 @@ Return Value:
 
             LANCE_GET_MESSAGE_SIZE(CurrentEntry, PacketSize);
 
-            LookAheadSize = PacketSize;
-
             //
-            // Find amount to indicate.
+            // PacketSize is MCNT minus the 4-byte FCS.  An MCNT below 4
+            // makes it wrap to a huge UINT, a frame shorter than the
+            // Ethernet header would make LookAheadSize wrap below, and
+            // anything over 1514 bytes is not a frame we can describe to
+            // NDIS (and TransferData would read past the packet).  None
+            // of these come from a healthy chip; drop them rather than
+            // indicate garbage lengths.
             //
+            if ((PacketSize < LANCE_HEADER_SIZE) ||
+                (PacketSize > LANCE_LARGE_BUFFER_SIZE))
+            {
+                Adapter->FramingError++;
 
-            LookAheadSize = ((LookAheadSize < Adapter->SizeOfReceiveBuffer) ?
-                             LookAheadSize :
-                             Adapter->SizeOfReceiveBuffer);
+                LookaheadBuffer = NULL;
+            }
+            else
+            {
+                LookAheadSize = PacketSize;
 
-            LookAheadSize -= LANCE_HEADER_SIZE;
+                //
+                // Find amount to indicate.
+                //
 
-            //
-            // Increment the number of packets succesfully received.
-            //
+                LookAheadSize = ((LookAheadSize < Adapter->SizeOfReceiveBuffer) ?
+                                 LookAheadSize :
+                                 Adapter->SizeOfReceiveBuffer);
 
-            Adapter->Receive++;
+                LookAheadSize -= LANCE_HEADER_SIZE;
 
-            LOG(INDICATE);
+                //
+                // Increment the number of packets succesfully received.
+                //
 
-            Adapter->IndicatingMacReceiveContext = Context;
+                Adapter->Receive++;
 
-            Adapter->IndicatedAPacket = TRUE;
+                LOG(INDICATE);
 
-            NdisCreateLookaheadBufferFromSharedMemory(
-                (PVOID)(Adapter->ReceiveVAs[Adapter->CurrentReceiveIndex]),
-                LookAheadSize + LANCE_HEADER_SIZE,
-                &LookaheadBuffer
-            );
+                Adapter->IndicatingMacReceiveContext = Context;
+
+                Adapter->IndicatedAPacket = TRUE;
+
+                NdisCreateLookaheadBufferFromSharedMemory(
+                    (PVOID)(Adapter->ReceiveVAs[Adapter->CurrentReceiveIndex]),
+                    LookAheadSize + LANCE_HEADER_SIZE,
+                    &LookaheadBuffer
+                );
+            }
 
             if (LookaheadBuffer != NULL)
             {
-                if (PacketSize < LANCE_HEADER_SIZE)
-                {
-                    if (PacketSize >= ETH_LENGTH_OF_ADDRESS)
-                    {
-                        //
-                        // Runt packet
-                        //
-
-                        NdisMEthIndicateReceive(
-                            Adapter->MiniportAdapterHandle,
-                            (NDIS_HANDLE)Context.WholeThing,
-                            LookaheadBuffer,
-                            PacketSize,
-                            NULL,
-                            0,
-                            0
-                        );
-                    }
-                }
-                else
-                {
-                    NdisMEthIndicateReceive(
-                        Adapter->MiniportAdapterHandle,
-                        (NDIS_HANDLE)Context.WholeThing,
-                        LookaheadBuffer,
-                        LANCE_HEADER_SIZE,
-                        LookaheadBuffer + LANCE_HEADER_SIZE,
-                        LookAheadSize,
-                        PacketSize - LANCE_HEADER_SIZE
-                    );
-                }
+                NdisMEthIndicateReceive(
+                    Adapter->MiniportAdapterHandle,
+                    (NDIS_HANDLE)Context.WholeThing,
+                    LookaheadBuffer,
+                    LANCE_HEADER_SIZE,
+                    LookaheadBuffer + LANCE_HEADER_SIZE,
+                    LookAheadSize,
+                    PacketSize - LANCE_HEADER_SIZE
+                );
 
                 NdisDestroyLookaheadBufferFromSharedMemory(LookaheadBuffer);
             }
@@ -3526,32 +3915,29 @@ Return Value:
         if (NumberOfBuffers > (TopReceiveIndex + 1))
         {
             //
-            // Error!  For some reason we wrapped without ever seeing
-            // the end of packet.  The card is hosed.  Stop the
-            // whole process.
+            // Error!  We went all the way round the receive ring
+            // without seeing the end of a packet, so the ring is
+            // inconsistent.  Stop the chip and reinitialize it; the
+            // reset path rebuilds both rings from scratch.
             //
-
+            // (This used to call NdisMDeregisterInterrupt, which must
+            // not be called at DISPATCH_LEVEL from our own DPC and
+            // which LanceHalt would then have called a second time.)
             //
-            // There are opens to notify
-            //
-            Adapter->HardwareFailure = TRUE;
-
-            NdisMIndicateStatus(
-                Adapter->MiniportAdapterHandle,
-                NDIS_STATUS_CLOSING,
-                NULL,
-                0
-            );
-
-            NdisMIndicateStatusComplete(Adapter->MiniportAdapterHandle);
-
-            NdisMDeregisterInterrupt(&(Adapter->Interrupt));
-
             NdisWriteErrorLogEntry(
                 Adapter->MiniportAdapterHandle,
                 NDIS_ERROR_CODE_HARDWARE_FAILURE,
-                0
+                1,
+                (ULONG)0x2
             );
+
+            if (!Adapter->ResetInProgress)
+            {
+                SetupForReset(
+                    Adapter,
+                    NdisRequestGeneric4 // Means MAC issued
+                );
+            }
 
             return(TRUE);
         }
@@ -4088,13 +4474,32 @@ Return Value:
 
 --*/
 {
-
-    ULONG PhysAdr;
-
     //
     // Fill in the adapters initialization block.
     //
     LanceSetInitializationBlock(Adapter);
+
+    //
+    // Selecting CSR1/CSR2 moves RAP away from CSR0, so do it with the ISR
+    // locked out on every processor.  IDON is reported by interrupt:
+    // LanceInitialInit waits for it, the reset path handles it in
+    // LanceHandleInterrupt.
+    //
+    NdisMSynchronizeWithInterrupt(
+        &Adapter->Interrupt,
+        LanceSyncStartInit,
+        (PVOID)Adapter
+    );
+}
+
+STATIC
+BOOLEAN
+LanceSyncStartInit(
+    IN PVOID Context
+    )
+{
+    PLANCE_ADAPTER Adapter = (PLANCE_ADAPTER)Context;
+    ULONG PhysAdr;
 
     PhysAdr = LANCE_GET_HARDWARE_PHYSICAL_ADDRESS(Adapter,Adapter->InitBlock);
 
@@ -4117,11 +4522,7 @@ Return Value:
     LANCE_WRITE_RAP(Adapter, LANCE_SELECT_CSR0);
     LANCE_WRITE_RDP(Adapter, LANCE_CSR0_INIT_CHIP);
 
-    //
-    // Delay execution for 1/2 second to give the lance
-    // time to initialize.
-    //
-    NdisStallExecution( 500000 );
+    return(FALSE);
 }
 
 STATIC
@@ -4180,10 +4581,31 @@ Return Value:
     Adapter->ResetInitStarted = FALSE;
 
     //
-    // Shut down all of the transmit queues so that the
-    // transmit portion of the chip will eventually calm down.
+    // Record what has to be completed once the chip is reinitialized.
+    // Flags, not a single value: a MAC-issued reset (NdisRequestGeneric4)
+    // that starts while a set-information is pending must not make us
+    // forget to complete that request.
     //
-    Adapter->ResetRequestType = NdisRequestType;
+    switch (NdisRequestType)
+    {
+        case NdisRequestSetInformation:
+            Adapter->SetInformationPending = TRUE;
+            break;
+
+        case NdisRequestGeneric1:
+            //
+            // MiniportReset.  NDIS aborts a request that is still
+            // pending on a serialized miniport before it calls
+            // MiniportReset, so that request is no longer ours to
+            // complete (this matches what the original driver did).
+            //
+            Adapter->ResetPending = TRUE;
+            Adapter->SetInformationPending = FALSE;
+            break;
+
+        default:
+            break;
+    }
 
 #if LANCE_TRACE
     DbgPrint("Out SetupForReset\n");

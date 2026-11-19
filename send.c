@@ -211,7 +211,13 @@ Return Value:
         if ((!TotalVirtualLength) ||
             (TotalVirtualLength > LANCE_LARGE_BUFFER_SIZE)) {
 
-            return(NDIS_STATUS_RESOURCES);
+            //
+            // This packet can never be sent.  FAILURE completes it;
+            // RESOURCES would make NDIS hold it at the head of the send
+            // queue and offer it again forever, blocking everything
+            // behind it.
+            //
+            return(NDIS_STATUS_FAILURE);
 
         } else {
 
@@ -405,7 +411,7 @@ Return Value:
 
         }
 
-    } else if (Adapter->ResetRequestType == NdisRequestGeneric1) {
+    } else if (Adapter->ResetPending) {
 
         Status = NDIS_STATUS_RESET_IN_PROGRESS;
 

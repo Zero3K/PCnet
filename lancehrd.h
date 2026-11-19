@@ -39,6 +39,48 @@ Notes:
 #define LANCE_SELECT_CSR0 ((USHORT)0)
 #define LANCE_SELECT_CSR1 ((USHORT)1)
 #define LANCE_SELECT_CSR2 ((USHORT)2)
+#define LANCE_SELECT_CSR4  ((USHORT)4)
+#define LANCE_SELECT_CSR88 ((USHORT)88)
+#define LANCE_SELECT_CSR89 ((USHORT)89)
+#define LANCE_SELECT_BCR18 ((USHORT)18)
+#define LANCE_SELECT_BCR20 ((USHORT)20)
+
+//
+// CSR4 (test and features control).  The xxxM bits mask the matching
+// interrupt sources; all four are set after reset (0x0115).
+//
+#define LANCE_CSR4_DMAPLUS  ((USHORT)0x4000)
+#define LANCE_CSR4_MFCOM    ((USHORT)0x0100)
+#define LANCE_CSR4_RCVCCOM  ((USHORT)0x0010)
+#define LANCE_CSR4_TXSTRTM  ((USHORT)0x0004)
+#define LANCE_CSR4_JABM     ((USHORT)0x0001)
+
+//
+// BCR18 (burst and bus control).
+//
+#define LANCE_BCR18_DWIO    ((USHORT)0x0080)
+#define LANCE_BCR18_BREADE  ((USHORT)0x0040)
+#define LANCE_BCR18_BWRITE  ((USHORT)0x0020)
+
+//
+// Every PCnet-PCI/FAST part enumerates as 1022:2000; the Am79C978
+// HomePNA function enumerates as 1022:2001.  The individual chip is
+// identified by the part number in CSR88/CSR89, not by the PCI ID.
+//
+#define PCNET_PCI_VENDOR_ID         ((USHORT)0x1022)
+#define PCNET_PCI_DEVICE_ID         ((USHORT)0x2000)
+#define PCNET_HOME_PCI_DEVICE_ID    ((USHORT)0x2001)
+
+#define PCNET_CHIP_PART(ChipId)     ((USHORT)(((ChipId) >> 12) & 0xffff))
+
+#define PCNET_PART_79C970           ((USHORT)0x2420)
+#define PCNET_PART_79C970_ALT       ((USHORT)0x2430)
+#define PCNET_PART_79C970A          ((USHORT)0x2621)
+#define PCNET_PART_79C971           ((USHORT)0x2623)
+#define PCNET_PART_79C972           ((USHORT)0x2624)
+#define PCNET_PART_79C973           ((USHORT)0x2625)
+#define PCNET_PART_79C978           ((USHORT)0x2626)
+#define PCNET_PART_79C975           ((USHORT)0x2627)
 
 #define LANCE_CSR0_INITIALIZE             ((USHORT)(0x0001))
 #define LANCE_CSR0_START                  ((USHORT)(0x0002))
@@ -326,7 +368,7 @@ typedef struct _LANCE_TRANSMIT_ENTRY {
 #define LANCE_TRANSMIT_TDR            ((USHORT)(0x03ff))
 #define LANCE_TRANSMIT_RETRY          ((USHORT)(0x0400))
 #define LANCE_TRANSMIT_LOST_CARRIER   ((USHORT)(0x0800))
-#define LANCE_TRANSMIT_LATE_COLLISION ((USHORT)(0x0100))
+#define LANCE_TRANSMIT_LATE_COLLISION ((USHORT)(0x1000))
 #define LANCE_TRANSMIT_UNDERFLOW      ((USHORT)(0x4000))
 #define LANCE_TRANSMIT_BUFFER         ((USHORT)(0x8000))
 
