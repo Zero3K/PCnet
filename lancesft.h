@@ -631,6 +631,12 @@ typedef struct _LANCE_ADAPTER {
     BOOLEAN SurpriseRemoved;
 
     //
+    // Set at the start of LanceHalt.  From then on no reset may start
+    // and the deferred timer may not be armed again.
+    //
+    BOOLEAN Halting;
+
+    //
     // Lookahead buffer for loopback packets
     //
     UCHAR Lookahead[LANCE_MAX_LOOKAHEAD + LANCE_HEADER_SIZE];
@@ -674,7 +680,7 @@ typedef struct _LANCE_ADAPTER {
 #define LANCE_DO_DEFERRED(Adapter) \
 { \
     PLANCE_ADAPTER _A = (Adapter); \
-    if (_A->ResetInProgress) { \
+    if (_A->ResetInProgress && !_A->Halting) { \
         NdisMSetTimer(&_A->DeferredTimer, 0);\
     } \
 }

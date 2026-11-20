@@ -692,6 +692,21 @@ Return Value:
     LOG(REMOVE);
 
     //
+    // 0. Halt does not hold the miniport lock, so on another CPU the
+    //    deferred timer can be running a pending reset right now.  Left
+    //    alone, it could INIT the chip again after step 1 stops it, or
+    //    synchronize with the interrupt after step 2 has deregistered it.
+    //    Block any new reset or timer, then wait for one that is already
+    //    running to finish.
+    //
+    Adapter->Halting = TRUE;
+    Adapter->ResetInProgress = FALSE;
+    KeMemoryBarrier();
+
+    NdisMCancelTimer(&Adapter->DeferredTimer, &TimerCancelled);
+    KeFlushQueuedDpcs();
+
+    //
     // 1. Stop the chip, synchronized with the ISR so the RAP write cannot
     //    land between the ISR's RAP save and restore on another CPU.
     //    After a surprise removal there is no chip to stop.
@@ -712,19 +727,12 @@ Return Value:
     NdisMDeregisterInterrupt(&(Adapter->Interrupt));
 
     //
-    // 3. Stop deferred timer processing before freeing the adapter.
+    // 3. Nothing can arm the timer since step 0 (LANCE_DO_DEFERRED checks
+    //    Halting).  Cancel it once more and flush, so nothing that was
+    //    already queued can run after the memory is freed.
     //
-    Adapter->ResetInProgress = FALSE;
     NdisMCancelTimer(&Adapter->DeferredTimer, &TimerCancelled);
-    if (!TimerCancelled)
-    {
-        KeFlushQueuedDpcs();
-        NdisMCancelTimer(&Adapter->DeferredTimer, &TimerCancelled);
-        if (!TimerCancelled)
-        {
-            KeFlushQueuedDpcs();
-        }
-    }
+    KeFlushQueuedDpcs();
 
     //
     // 4. With the chip stopped and nothing left to call back into us,
@@ -1553,7 +1561,12 @@ Return Value:
 
 {
 
-    if (Adapter->ResetInProgress) {
+    //
+    // Never restart the chip once LanceHalt has begun: an IDON still
+    // being handled in the DPC would otherwise start it again after
+    // Halt stopped it, with its memory about to be freed.
+    //
+    if (Adapter->ResetInProgress || Adapter->Halting) {
 
         return;
 
@@ -2003,7 +2016,8 @@ Return Value:
         // it is safe to start the reset.
         //
         if (Adapter->ResetInProgress &&
-            !Adapter->ResetInitStarted
+            !Adapter->ResetInitStarted &&
+            !Adapter->Halting
         )
         {
 #if LANCE_TRACE
