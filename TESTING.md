@@ -102,10 +102,12 @@ Run every item on both adapter types. Write down the result and anything odd in 
 | 8 | Cable unplug | VM *Settings → Network → Adapter 1 → Cable Connected* off (or the network icon in the VM status bar → *Connect Network Adapter*) for 30 s, then back on | Pings fail while unplugged and resume by themselves after replug. No bugcheck, adapter stays enabled. (The driver does not report media-disconnect status; see CHANGES.md.) |
 | 9 | Disable / enable | Device Manager → adapter → *Disable*, then *Enable*. Repeat 5 times | Each enable reloads the driver (chip ID line again), and DHCP and ping work again. No bugcheck on disable, which exercises LanceHalt |
 | 10 | Reboot | Restart from the Start menu, 3 times | Clean shutdown (LanceShutdown stops the chip), and after the next boot tests 1–4 pass |
-| 11 | Cold boot | Power off, then on | Same as 10 |
+| 11 | Cold boot | Fully power off, then on; repeat several times on both adapter types | Same as 10, including DHCP and ping after each cold boot |
 | 12 | Promiscuous / multicast (optional) | Run a packet capture tool, if one is available for the guest | Capture starts and stops without breaking connectivity. That exercises the filter-change reset path |
 
 If a test fails, keep the debug output and note the test number. A `!analyze -v` (WinDbg) or `bt` (KDBG) from any bugcheck is the most useful thing to send back.
+
+For the low-memory DMA allocation change, also repeat cold boots and disable/enable cycles when low physical memory is fragmented. With a kernel debugger, verify that the initialization block and rings share one allocation, each receive and transmit buffer has its own allocation, and every allocation ends below 16 MB. If allocation failures can be injected, check failures at the descriptor allocation and at early and late receive and transmit buffer allocations; each attempt must release all prior allocations and leave the device stopped. Repeat on Windows 7 x64 when a compatible x64 driver build and package are available.
 
 ## 6. Not covered by the VM
 

@@ -510,8 +510,6 @@ Return Value:
             return(NDIS_STATUS_ADAPTER_NOT_FOUND);
         }
 
-        Adapter->AmountOfHardwareMemory = 0x10000;
-
         NdisMSetAttributesEx(
             MiniportAdapterHandle,
             (NDIS_HANDLE)Adapter,
@@ -1172,6 +1170,10 @@ Return Value:
     Adapter->NumberOfSmallBuffers = LANCE_64K_NUMBER_OF_SMALL_BUFFERS;
     Adapter->NumberOfMediumBuffers = LANCE_64K_NUMBER_OF_MEDIUM_BUFFERS;
     Adapter->NumberOfLargeBuffers = LANCE_64K_NUMBER_OF_LARGE_BUFFERS;
+    Adapter->AmountOfHardwareMemory =
+        (((ULONG)sizeof(LANCE_INITIALIZATION_BLOCK) + 7) & ~7UL) +
+        (((ULONG)sizeof(LANCE_TRANSMIT_ENTRY) * Adapter->NumberOfTransmitRings + 7) & ~7UL) +
+        (((ULONG)sizeof(LANCE_RECEIVE_ENTRY) * Adapter->NumberOfReceiveRings + 7) & ~7UL);
 
     if (LancePciHardwareDetails(Adapter))
     {
@@ -2046,6 +2048,26 @@ LoopBottom:;
 
 #pragma NDIS_PAGEABLE_FUNCTION(AllocateAdapterMemory)
 
+STATIC
+PVOID
+LanceAllocatePacketBuffer(
+    IN ULONG Size
+    )
+{
+    NDIS_PHYSICAL_ADDRESS LowestAcceptableAddress =
+        NDIS_PHYSICAL_ADDRESS_CONST(0, 0);
+    NDIS_PHYSICAL_ADDRESS HighestAcceptableAddress =
+        NDIS_PHYSICAL_ADDRESS_CONST(0x00FFFFFF, 0);
+
+    return MmAllocateContiguousMemorySpecifyCache(
+        Size,
+        LowestAcceptableAddress,
+        HighestAcceptableAddress,
+        LowestAcceptableAddress,
+        MmNonCached
+        );
+}
+
 BOOLEAN
 AllocateAdapterMemory(
     IN PLANCE_ADAPTER Adapter
@@ -2219,11 +2241,8 @@ Return Value:
         i++,CurrentReceiveEntry++
         ) {
 
-        LANCE_ALLOCATE_MEMORY_FOR_HARDWARE(
-            Adapter,
-            Adapter->SizeOfReceiveBuffer,
-            &Adapter->ReceiveVAs[i]
-            );
+        Adapter->ReceiveVAs[i] =
+            LanceAllocatePacketBuffer(Adapter->SizeOfReceiveBuffer);
 
         if (Adapter->ReceiveVAs[i] == NULL) {
             DeleteAdapterMemory(Adapter);
@@ -2313,11 +2332,8 @@ Return Value:
         i++
         ) {
 
-        LANCE_ALLOCATE_MEMORY_FOR_HARDWARE(
-            Adapter,
-            LANCE_SMALL_BUFFER_SIZE,
-            &Adapter->LanceBuffers[i].VirtualLanceBuffer
-            );
+        Adapter->LanceBuffers[i].VirtualLanceBuffer =
+            LanceAllocatePacketBuffer(LANCE_SMALL_BUFFER_SIZE);
 
         if (Adapter->LanceBuffers[i].VirtualLanceBuffer == NULL) {
             DeleteAdapterMemory(Adapter);
@@ -2347,11 +2363,8 @@ Return Value:
         i++
         ) {
 
-        LANCE_ALLOCATE_MEMORY_FOR_HARDWARE(
-            Adapter,
-            LANCE_MEDIUM_BUFFER_SIZE,
-            &Adapter->LanceBuffers[i].VirtualLanceBuffer
-            );
+        Adapter->LanceBuffers[i].VirtualLanceBuffer =
+            LanceAllocatePacketBuffer(LANCE_MEDIUM_BUFFER_SIZE);
 
         if (Adapter->LanceBuffers[i].VirtualLanceBuffer == NULL) {
             DeleteAdapterMemory(Adapter);
@@ -2380,11 +2393,8 @@ Return Value:
         ) {
 
 
-        LANCE_ALLOCATE_MEMORY_FOR_HARDWARE(
-            Adapter,
-            LANCE_LARGE_BUFFER_SIZE,
-            &Adapter->LanceBuffers[i].VirtualLanceBuffer
-            );
+        Adapter->LanceBuffers[i].VirtualLanceBuffer =
+            LanceAllocatePacketBuffer(LANCE_LARGE_BUFFER_SIZE);
 
         if (Adapter->LanceBuffers[i].VirtualLanceBuffer == NULL) {
             DeleteAdapterMemory(Adapter);
@@ -2495,14 +2505,7 @@ Return Value:
 
             if (Adapter->ReceiveVAs[i]) {
 
-                LANCE_DEALLOCATE_MEMORY_FOR_HARDWARE(
-                    Adapter,
-                    Adapter->ReceiveVAs[i]
-                    );
-
-            } else {
-
-                break;
+                MmFreeContiguousMemory(Adapter->ReceiveVAs[i]);
 
             }
 
@@ -2535,14 +2538,9 @@ Return Value:
 
             if (Adapter->LanceBuffers[i].VirtualLanceBuffer) {
 
-                LANCE_DEALLOCATE_MEMORY_FOR_HARDWARE(
-                    Adapter,
+                MmFreeContiguousMemory(
                     Adapter->LanceBuffers[i].VirtualLanceBuffer
                     );
-
-            } else {
-
-                break;
 
             }
 
