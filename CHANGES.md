@@ -97,7 +97,7 @@ Each entry gives what was wrong, what changed, and how to verify it. The test nu
 
 ## Performance
 
-The driver still copies every transmitted packet into a bounce buffer in the shared DMA block, but its pool now has 16 large buffers instead of 4 to reduce send-queue stalls. The receive ring uses 64 512-byte buffers, keeping its total data capacity at 32 KB while reducing a full-size frame from 6 descriptors to 3. These changes reduce buffer exhaustion and descriptor-processing overhead without exceeding the 64 KB DMA pool. Throughput should be checked with the sustained-transfer tests in TESTING.md; in VirtualBox, the **Intel PRO/1000 MT** adapter type may still be faster and has built-in drivers on XP through Windows 11.
+The driver still copies every transmitted packet into a bounce buffer in the shared DMA block, but its pool now has 16 large buffers instead of 4 to reduce send-queue stalls. The receive ring uses 64 512-byte buffers, keeping its total data capacity at 32 KB while reducing a full-size frame from 6 descriptors to 3. Receive processing now handles up to half the ring (32 packets) before resynchronizing with the ISR, reducing synchronization overhead during bursts while keeping each pass bounded. These changes reduce buffer exhaustion and descriptor-processing overhead without exceeding the 64 KB DMA pool. Throughput should be checked with the sustained-transfer tests in TESTING.md; in VirtualBox, the **Intel PRO/1000 MT** adapter type may still be faster and has built-in drivers on XP through Windows 11.
 
 ## Known issues not fixed
 
