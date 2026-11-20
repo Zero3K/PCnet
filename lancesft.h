@@ -714,7 +714,7 @@ typedef enum _LANCE_PROC_ID {
     } else { \
         _HighWater = ((PCHAR)_Adapter->CurrentMemoryFirstFree) + _Size; \
         if (((PUCHAR)_HighWater) > \
-            (((PUCHAR)_Adapter->MemoryFirstUnavailable) + 1)) { \
+            ((PUCHAR)_Adapter->MemoryFirstUnavailable)) { \
             *(P) = NULL; \
         } else { \
             *(P) = _Adapter->CurrentMemoryFirstFree; \
