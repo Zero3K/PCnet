@@ -282,6 +282,12 @@ SetupForReset(
     IN NDIS_REQUEST_TYPE RequestType
     );
 
+STATIC
+VOID
+LanceQueueSetBehindReset(
+    IN PLANCE_ADAPTER Adapter
+    );
+
 NDIS_STATUS
 LanceInitialInit(
     IN PLANCE_ADAPTER Adapter
@@ -1960,6 +1966,23 @@ Return Value:
             Adapter->ResetInProgress = FALSE;
             Adapter->ResetInitStarted = FALSE;
 
+            if (Adapter->ReinitAfterReset)
+            {
+                Adapter->ReinitAfterReset = FALSE;
+
+                if (!Adapter->Halting)
+                {
+                    //
+                    // A filter or multicast set came in after this INIT
+                    // had already read the old init block (see
+                    // LanceQueueSetBehindReset).  Reset once more to load
+                    // it; the set completes at that IDON.
+                    //
+                    SetupForReset(Adapter, NdisRequestGeneric4);
+                    goto LoopBottom;
+                }
+            }
+
             //
             // Take a copy and clear the flags first: completing a request
             // can lead NDIS straight back into us with another one that
@@ -3312,7 +3335,9 @@ Return Value:
     // Check to see if the device is already resetting.
     //
 
-    if (Adapter->ResetInProgress || Adapter->HardwareFailure)
+    if (Adapter->HardwareFailure ||
+        (Adapter->ResetInProgress &&
+         (NdisRequestType != NdisRequestSetInformation)))
     {
         return(NDIS_STATUS_FAILURE);
     }
@@ -3322,7 +3347,14 @@ Return Value:
     //
     Adapter->PacketFilter = PacketFilter;
 
-    SetupForReset(Adapter, NdisRequestType);
+    if (Adapter->ResetInProgress)
+    {
+        LanceQueueSetBehindReset(Adapter);
+    }
+    else
+    {
+        SetupForReset(Adapter, NdisRequestType);
+    }
 
 #if LANCE_TRACE
     DbgPrint("Out LanceSetPacketFilter\n");
@@ -3437,9 +3469,11 @@ Return Value:
 
     //
     // Check to see if the device is already resetting.  If it is
-    // then pend this add.
+    // then pend this add behind that reset.
     //
-    if (Adapter->ResetInProgress || Adapter->HardwareFailure)
+    if (Adapter->HardwareFailure ||
+        (Adapter->ResetInProgress &&
+         (NdisRequestType != NdisRequestSetInformation)))
     {
 
         return(NDIS_STATUS_FAILURE);
@@ -3456,7 +3490,14 @@ Return Value:
         NewAddressCount * LANCE_LENGTH_OF_ADDRESS
     );
 
-    SetupForReset(Adapter, NdisRequestType);
+    if (Adapter->ResetInProgress)
+    {
+        LanceQueueSetBehindReset(Adapter);
+    }
+    else
+    {
+        SetupForReset(Adapter, NdisRequestType);
+    }
 
 
 #if LANCE_TRACE
@@ -4670,6 +4711,48 @@ LanceSyncStartInit(
 
 STATIC
 VOID
+LanceQueueSetBehindReset(
+    IN PLANCE_ADAPTER Adapter
+    )
+
+/*++
+
+Routine Description:
+
+    A filter or multicast set arrived while a reset the driver started
+    itself (memory error, babble, transmitter stopped) is still running.
+    It used to fail, and if TCP/IP's filter set at bind time landed here
+    nothing was received.  The caller has already stored the new value;
+    this makes the running reset carry it and complete the request.
+
+    NDIS sends one request at a time and none during MiniportReset, so
+    no other completion is owed at this point.
+
+--*/
+
+{
+    ASSERT(Adapter->ResetInProgress);
+    ASSERT(!Adapter->SetInformationPending && !Adapter->ResetPending);
+
+    Adapter->SetInformationPending = TRUE;
+
+    if (Adapter->ResetInitStarted)
+    {
+        //
+        // INIT was issued with the old init block.  The IDON handler
+        // will run one more reset to load the new one.
+        //
+        Adapter->ReinitAfterReset = TRUE;
+    }
+
+    //
+    // Otherwise StartAdapterReset has not run yet, and it builds the init
+    // block from the values just stored.
+    //
+}
+
+STATIC
+VOID
 SetupForReset(
     IN PLANCE_ADAPTER Adapter,
     IN NDIS_REQUEST_TYPE NdisRequestType
@@ -4744,6 +4827,12 @@ Return Value:
             //
             Adapter->ResetPending = TRUE;
             Adapter->SetInformationPending = FALSE;
+
+            //
+            // This reset rebuilds the init block from the current values
+            // anyway, so no extra reset is needed afterwards.
+            //
+            Adapter->ReinitAfterReset = FALSE;
             break;
 
         default:

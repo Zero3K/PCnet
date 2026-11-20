@@ -601,6 +601,14 @@ typedef struct _LANCE_ADAPTER {
     BOOLEAN ResetPending;           // NdisMResetComplete owed
 
     //
+    // A filter or multicast set arrived during a driver-started reset
+    // whose INIT had already been issued with the old init block.  The
+    // IDON handler runs one more reset to load the new values before it
+    // completes the request.
+    //
+    BOOLEAN ReinitAfterReset;
+
+    //
     // During an indication this is set to the current indications context
     //
     LANCE_RECEIVE_CONTEXT IndicatingMacReceiveContext;
