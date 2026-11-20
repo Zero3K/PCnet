@@ -1130,6 +1130,7 @@ Return Value:
     //
     NDIS_STATUS Status;
     USHORT ResetValue;
+    UINT Retry;
 
     PAGED_CODE();
 
@@ -1203,13 +1204,25 @@ Return Value:
         }
 
         Adapter->MmMappedBaseAddr = NULL;
-        Adapter->MmMappedBaseAddr = MmAllocateContiguousMemorySpecifyCache(
-            Adapter->AmountOfHardwareMemory,
-            LowestAcceptableAddress,
-            HighestAcceptableAddress,
-            LowestAcceptableAddress,
-            MmNonCached
-            );
+        for (Retry = 0; Retry < 10; Retry++)
+        {
+            Adapter->MmMappedBaseAddr = MmAllocateContiguousMemorySpecifyCache(
+                Adapter->AmountOfHardwareMemory,
+                LowestAcceptableAddress,
+                HighestAcceptableAddress,
+                LowestAcceptableAddress,
+                MmNonCached
+                );
+            if (Adapter->MmMappedBaseAddr != NULL)
+            {
+                break;
+            }
+
+            if (Retry < 9)
+            {
+                NdisMSleep(100000);
+            }
+        }
 
         if (Adapter->MmMappedBaseAddr != NULL)
         {
