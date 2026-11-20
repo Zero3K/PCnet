@@ -1,10 +1,10 @@
 # Changes on branch `fix/win7-on-master`
 
-The starting point was the NT 4.0 DDK DEC LANCE driver as ported by Copilot: 16-bit LANCE mode (SWSTYLE 0), 24-bit DMA, PCI detection added, and EISA/ISA/TURBOchannel removed. Every fix below is its own commit, and the commit messages give the full reasoning. The design has not changed: 16-bit LANCE mode, SWSTYLE 0, 24-bit DMA through a DMA pool below 16 MB.
+The starting point was the NT 4.0 DDK DEC LANCE driver as ported by Copilot: 16-bit LANCE mode (SWSTYLE 0), 24-bit DMA, PCI detection added, and EISA/ISA/TURBOchannel removed. Every fix below is its own commit, and the commit messages give the full reasoning. The design remains 16-bit LANCE mode, SWSTYLE 0, and 24-bit DMA, using an NDIS-managed shared-memory pool.
 
 This branch sits on top of `master` as of `c723dfb` (merge of #17), so it keeps the fixes already merged there:
 
-- **Low contiguous DMA pool** (#15). The pool is allocated with `MmAllocateContiguousMemorySpecifyCache` below 16 MB, which fixed the Windows 7 "conflict in resources" error. The fixes below free it with `MmFreeContiguousMemory` to match.
+- **NDIS-managed shared DMA pool** (#55; replaces #15's low contiguous pool). The driver initializes scatter/gather DMA and allocates its shared pool with `NdisMAllocateSharedMemory`, allowing NDIS to manage DMA mappings when low physical memory is scarce. This replaces the earlier `MmAllocateContiguousMemorySpecifyCache` allocation constrained below 16 MB.
 - **Interrupt causes kept for the DPC** (#17). The ISR acknowledges CSR0 and saves the causes; the DPC collects them under `NdisMSynchronizeWithInterrupt`. Fix 5 below keeps this design and closes the remaining gaps.
 
 **Windows 7 DHCP failure** ("unidentified network", 169.254.x.x address): fix 12 is the likely cause. After a packet-filter or multicast change, the driver never told NDIS to resume sending, so the DHCP request never went out. Windows 7 makes several of those changes as the interface comes up; Server 2003 does not.
@@ -79,7 +79,7 @@ Each entry gives what was wrong, what changed, and how to verify it. The test nu
 
 ### Reviewed and found correct (no change)
 
-- **24-bit DMA.** The driver allocates its contiguous DMA pool with a highest acceptable address of 0x00FFFFFF, so it lies entirely below 16 MB. Every descriptor and buffer address is taken from that pool. The high byte comes from `(addr >> 16) & 0xff`, and CSR2[15:8] (the upper address byte in 16-bit mode) is written as 0.
+- **24-bit DMA.** Every descriptor and buffer address must fit the hardware's 24-bit address fields. The driver uses the NIC-visible address returned by NDIS for its shared-memory pool, adds offsets for each descriptor and buffer, and writes the high byte from `(addr >> 16) & 0xff`. CSR2[15:8] (the upper address byte in 16-bit mode) remains 0.
 - **Register offsets.** RDP 0x10, RAP 0x12, reset 0x14 and BDP 0x16 are correct for WIO mode.
 
 ## Untested
