@@ -3691,6 +3691,7 @@ Return Value:
     // need to get it from the adapter all the time.
     //
     const UINT TopReceiveIndex = Adapter->NumberOfReceiveRings - 1;
+    const UINT ReceivePacketLimit = Adapter->NumberOfReceiveRings / 2;
 
     //
     // Boolean to record the fact that we've finished processing
@@ -3730,8 +3731,12 @@ Return Value:
 
             return(TRUE);
         }
-        else if (ReceivePacketCount > 10)
+        else if (ReceivePacketCount >= ReceivePacketLimit)
         {
+            //
+            // Amortize interrupt synchronization over a larger receive
+            // batch while keeping each pass bounded by half the ring.
+            //
             LOG(RECEIVE)
 
             return(FALSE);
