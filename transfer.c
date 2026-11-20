@@ -149,6 +149,12 @@ Return Value:
     UINT LocalBytesTransferred = 0;
 
     //
+    // FAILURE if a destination buffer could not be mapped, so the
+    // protocol doesn't take a short copy for a good packet.
+    //
+    NDIS_STATUS Status = NDIS_STATUS_SUCCESS;
+
+    //
     // Index in the ring of the current receive ring descriptor.
     //
     UINT CurrentSourceIndex;
@@ -198,6 +204,7 @@ Return Value:
 
         if ((DestinationVirtualAddress == NULL) &&
             (DestinationCurrentLength != 0)) {
+            Status = NDIS_STATUS_FAILURE;
             goto TransferDataComplete;
         }
 
@@ -260,6 +267,7 @@ Return Value:
                                 );
                 if ((DestinationVirtualAddress == NULL) &&
                     (DestinationCurrentLength != 0)) {
+                    Status = NDIS_STATUS_FAILURE;
                     break;
                 }
                 continue;
@@ -399,5 +407,5 @@ Return Value:
 TransferDataComplete:
     LANCE_DO_DEFERRED(Adapter);
 
-    return NDIS_STATUS_SUCCESS;
+    return Status;
 }
