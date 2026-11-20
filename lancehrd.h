@@ -132,6 +132,24 @@ Notes:
 #define LANCE_GET_HIGH_PART_ADDRESS(Adr) \
     ((UCHAR)(((ULONG)(Adr) >> 16) & 0xff))
 
+//
+// In 16-bit software style (SWSTYLE 0, SSIZE32 0) the init block and the
+// descriptors only hold 24-bit addresses.  The PCnet-PCI chips take bits
+// 31:24 of every bus-master address (init block, rings and buffers) from
+// CSR2[15:8], IADR[31:24].  So the DMA memory does not have to be below
+// 16 MB; it has to sit in one 16 MB-aligned window below 4 GB, and CSR2
+// has to carry that window's top byte.
+//
+#define LANCE_DMA_WINDOW_SIZE ((ULONG)0x01000000)
+#define LANCE_DMA_WINDOW_MASK ((ULONG)0xff000000)
+
+//
+// The full value for CSR2: IADR[31:24] in bits 15:8 and IADR[23:16] in
+// bits 7:0.
+//
+#define LANCE_GET_CSR2_ADDRESS(Adr) \
+    ((USHORT)(((ULONG)(Adr) >> 16) & 0xffff))
+
 typedef struct _LANCE_INITIALIZATION_BLOCK {
 
     USHORT ModeRegister;

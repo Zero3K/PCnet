@@ -1,6 +1,6 @@
 # Changes on branch `fix/win7-on-master`
 
-The starting point was the NT 4.0 DDK DEC LANCE driver as ported by Copilot: 16-bit LANCE mode (SWSTYLE 0), 24-bit DMA, PCI detection added, and EISA/ISA/TURBOchannel removed. Every fix below is its own commit, and the commit messages give the full reasoning. The design has not changed: 16-bit LANCE mode, SWSTYLE 0, 24-bit DMA through a DMA pool below 16 MB.
+The starting point was the NT 4.0 DDK DEC LANCE driver as ported by Copilot: 16-bit LANCE mode (SWSTYLE 0), 24-bit DMA, PCI detection added, and EISA/ISA/TURBOchannel removed. Every fix below is its own commit, and the commit messages give the full reasoning. The design has not changed: 16-bit LANCE mode, SWSTYLE 0, 24-bit descriptor addresses. Since the cold-boot fix below, the DMA memory sits in one 16 MB-aligned window below 4 GB instead of below 16 MB.
 
 This branch sits on top of `master` as of `c723dfb` (merge of #17), so it keeps the fixes already merged there:
 
@@ -8,6 +8,14 @@ This branch sits on top of `master` as of `c723dfb` (merge of #17), so it keeps 
 - **Interrupt causes kept for the DPC** (#17). The ISR acknowledges CSR0 and saves the causes; the DPC collects them under `NdisMSynchronizeWithInterrupt`. Fix 5 below keeps this design and closes the remaining gaps.
 
 **Windows 7 DHCP failure** ("unidentified network", 169.254.x.x address): fix 12 is the likely cause. After a packet-filter or multicast change, the driver never told NDIS to resume sending, so the DHCP request never went out. Windows 7 makes several of those changes as the interface comes up; Server 2003 does not.
+
+**Windows 7 x64 cold boot, Code 10** (#53, #55): every DMA allocation was limited to the first 16 MB of RAM. Early in a cold boot on x64 that memory is mostly in use, so the allocation failed. A disable/enable or a warm reboot happened to find room, which is why those worked. The chip doesn't need memory below 16 MB. In 16-bit mode the PCnet-PCI chips take bits 31:24 of every bus-master address (init block, rings and buffers) from CSR2[15:8] (IADR[31:24]). So the driver now:
+
+- allocates the init block and rings anywhere below 4 GB, without crossing a 16 MB boundary;
+- allocates every packet buffer inside that block's 16 MB window;
+- writes the full upper 16 address bits to CSR2 (it used to write 0 in bits 15:8).
+
+Map registers and bounce buffers (`NdisMAllocateSharedMemory`, as #55 suggests) can't help here. The chip reads and writes the init block, rings and buffers directly, so they have to be at addresses it can reach.
 
 ## Build results
 
@@ -79,7 +87,7 @@ Each entry gives what was wrong, what changed, and how to verify it. The test nu
 
 ### Reviewed and found correct (no change)
 
-- **24-bit DMA.** The driver allocates its contiguous DMA pool with a highest acceptable address of 0x00FFFFFF, so it lies entirely below 16 MB. Every descriptor and buffer address is taken from that pool. The high byte comes from `(addr >> 16) & 0xff`, and CSR2[15:8] (the upper address byte in 16-bit mode) is written as 0.
+- **24-bit DMA.** Descriptors hold address bits 23:0, with the high byte taken from `(addr >> 16) & 0xff`. Bits 31:24 come from CSR2[15:8], which holds the top byte of the 16 MB window that contains all of the DMA memory (see the cold-boot fix above).
 - **Register offsets.** RDP 0x10, RAP 0x12, reset 0x14 and BDP 0x16 are correct for WIO mode.
 
 ## Untested

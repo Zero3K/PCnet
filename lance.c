@@ -1177,10 +1177,19 @@ Return Value:
 
     if (LancePciHardwareDetails(Adapter))
     {
+        //
+        // The init block and rings can go anywhere below 4 GB, as long
+        // as they do not cross a 16 MB boundary: the chip gets bits 31:24
+        // from CSR2 (see LANCE_DMA_WINDOW_SIZE).  Insisting on the first
+        // 16 MB made this fail early in a cold boot on x64, when that
+        // memory is mostly taken (Code 10).
+        //
         NDIS_PHYSICAL_ADDRESS LowestAcceptableAddress =
             NDIS_PHYSICAL_ADDRESS_CONST(0, 0);
         NDIS_PHYSICAL_ADDRESS HighestAcceptableAddress =
-            NDIS_PHYSICAL_ADDRESS_CONST(0x00FFFFFF, 0);
+            NDIS_PHYSICAL_ADDRESS_CONST(0xFFFFFFFF, 0);
+        NDIS_PHYSICAL_ADDRESS DmaWindowBoundary =
+            NDIS_PHYSICAL_ADDRESS_CONST(LANCE_DMA_WINDOW_SIZE, 0);
 
         //
         // Get hold of the RAP and RDP address as well
@@ -1209,7 +1218,7 @@ Return Value:
             Adapter->AmountOfHardwareMemory,
             LowestAcceptableAddress,
             HighestAcceptableAddress,
-            LowestAcceptableAddress,
+            DmaWindowBoundary,
             MmNonCached
             );
 
@@ -1219,6 +1228,16 @@ Return Value:
             Adapter->SharedMemoryPhysicalAddress =
                 MmGetPhysicalAddress(Adapter->MmMappedBaseAddr);
             Adapter->SharedMemoryAllocated = TRUE;
+
+            //
+            // Every packet buffer has to land in the same 16 MB window.
+            //
+            ASSERT(NdisGetPhysicalAddressHigh(
+                       Adapter->SharedMemoryPhysicalAddress) == 0);
+            Adapter->DmaWindowBase =
+                NdisGetPhysicalAddressLow(
+                    Adapter->SharedMemoryPhysicalAddress) &
+                LANCE_DMA_WINDOW_MASK;
         }
         else
         {
@@ -2051,19 +2070,31 @@ LoopBottom:;
 STATIC
 PVOID
 LanceAllocatePacketBuffer(
+    IN PLANCE_ADAPTER Adapter,
     IN ULONG Size
     )
 {
-    NDIS_PHYSICAL_ADDRESS LowestAcceptableAddress =
-        NDIS_PHYSICAL_ADDRESS_CONST(0, 0);
-    NDIS_PHYSICAL_ADDRESS HighestAcceptableAddress =
-        NDIS_PHYSICAL_ADDRESS_CONST(0x00FFFFFF, 0);
+    //
+    // Keep the buffer inside the 16 MB window that holds the init block
+    // and rings: the descriptors only carry address bits 23:0, and CSR2
+    // supplies bits 31:24 for all of them.
+    //
+    NDIS_PHYSICAL_ADDRESS LowestAcceptableAddress;
+    NDIS_PHYSICAL_ADDRESS HighestAcceptableAddress;
+    NDIS_PHYSICAL_ADDRESS NoBoundary = NDIS_PHYSICAL_ADDRESS_CONST(0, 0);
+
+    NdisSetPhysicalAddressHigh(LowestAcceptableAddress, 0);
+    NdisSetPhysicalAddressLow(LowestAcceptableAddress, Adapter->DmaWindowBase);
+    NdisSetPhysicalAddressHigh(HighestAcceptableAddress, 0);
+    NdisSetPhysicalAddressLow(
+        HighestAcceptableAddress,
+        Adapter->DmaWindowBase + (LANCE_DMA_WINDOW_SIZE - 1));
 
     return MmAllocateContiguousMemorySpecifyCache(
         Size,
         LowestAcceptableAddress,
         HighestAcceptableAddress,
-        LowestAcceptableAddress,
+        NoBoundary,
         MmNonCached
         );
 }
@@ -2242,7 +2273,7 @@ Return Value:
         ) {
 
         Adapter->ReceiveVAs[i] =
-            LanceAllocatePacketBuffer(Adapter->SizeOfReceiveBuffer);
+            LanceAllocatePacketBuffer(Adapter, Adapter->SizeOfReceiveBuffer);
 
         if (Adapter->ReceiveVAs[i] == NULL) {
             DeleteAdapterMemory(Adapter);
@@ -2333,7 +2364,7 @@ Return Value:
         ) {
 
         Adapter->LanceBuffers[i].VirtualLanceBuffer =
-            LanceAllocatePacketBuffer(LANCE_SMALL_BUFFER_SIZE);
+            LanceAllocatePacketBuffer(Adapter, LANCE_SMALL_BUFFER_SIZE);
 
         if (Adapter->LanceBuffers[i].VirtualLanceBuffer == NULL) {
             DeleteAdapterMemory(Adapter);
@@ -2364,7 +2395,7 @@ Return Value:
         ) {
 
         Adapter->LanceBuffers[i].VirtualLanceBuffer =
-            LanceAllocatePacketBuffer(LANCE_MEDIUM_BUFFER_SIZE);
+            LanceAllocatePacketBuffer(Adapter, LANCE_MEDIUM_BUFFER_SIZE);
 
         if (Adapter->LanceBuffers[i].VirtualLanceBuffer == NULL) {
             DeleteAdapterMemory(Adapter);
@@ -2394,7 +2425,7 @@ Return Value:
 
 
         Adapter->LanceBuffers[i].VirtualLanceBuffer =
-            LanceAllocatePacketBuffer(LANCE_LARGE_BUFFER_SIZE);
+            LanceAllocatePacketBuffer(Adapter, LANCE_LARGE_BUFFER_SIZE);
 
         if (Adapter->LanceBuffers[i].VirtualLanceBuffer == NULL) {
             DeleteAdapterMemory(Adapter);
@@ -4514,11 +4545,15 @@ LanceSyncStartInit(
 
     //
     // Write the address of the initialization block to csr1 and csr2.
+    // CSR2[15:8] is IADR[31:24]: in 16-bit mode the chip puts it on top
+    // of every 24-bit address it uses, so it selects the DMA window.
     //
+    ASSERT((PhysAdr & LANCE_DMA_WINDOW_MASK) == Adapter->DmaWindowBase);
+
     LANCE_WRITE_RAP(Adapter, LANCE_SELECT_CSR1);
     LANCE_WRITE_RDP(Adapter, LANCE_GET_LOW_PART_ADDRESS(PhysAdr));
     LANCE_WRITE_RAP(Adapter, LANCE_SELECT_CSR2);
-    LANCE_WRITE_RDP(Adapter, LANCE_GET_HIGH_PART_ADDRESS(PhysAdr));
+    LANCE_WRITE_RDP(Adapter, LANCE_GET_CSR2_ADDRESS(PhysAdr));
 
     //
     // Write to csr0 to initialize the chip.
