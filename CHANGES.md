@@ -97,12 +97,7 @@ Each entry gives what was wrong, what changed, and how to verify it. The test nu
 
 ## Performance
 
-Expect throughput **equal to or lower than** AMD's PCnet driver or ReactOS's `pcnet.sys`, not higher. Reasons:
-
-- 16-bit LANCE mode copies every transmitted packet into a bounce buffer in the shared DMA block (4 large buffers, plus small and medium ones).
-- Received frames land in 256-byte buffers (128-entry ring), so a full-size frame spans 6 descriptors.
-
-Both are part of the original design, which this branch keeps. In VirtualBox, the **Intel PRO/1000 MT** adapter type is the faster option, and it has built-in drivers on XP through Windows 11.
+The driver still copies every transmitted packet into a bounce buffer in the shared DMA block, but its pool now has 16 large buffers instead of 4 to reduce send-queue stalls. The receive ring uses 64 512-byte buffers, keeping its total data capacity at 32 KB while reducing a full-size frame from 6 descriptors to 3. These changes reduce buffer exhaustion and descriptor-processing overhead without exceeding the 64 KB DMA pool. Throughput should be checked with the sustained-transfer tests in TESTING.md; in VirtualBox, the **Intel PRO/1000 MT** adapter type may still be faster and has built-in drivers on XP through Windows 11.
 
 ## Known issues not fixed
 
