@@ -109,8 +109,8 @@ If a test fails, keep the debug output and note the test number. A `!analyze -v`
 
 For the DMA window change, run test 11 (cold boot) at least 5 times on Windows 7 x64 with 2 GB or more of guest RAM. That's the case that failed with Code 10. With a kernel debugger, check these:
 
-- The init block and rings share one allocation, and each receive and transmit buffer has its own.
-- Every allocation is below 4 GB and has the same top address byte (bits 31:24) as the init block. With more guest RAM this byte is usually not 0.
+- The init block, rings, receive buffers and transmit buffers are all in one allocation of about 60 KB.
+- That allocation is below 4 GB and does not cross a 16 MB boundary. With more guest RAM its top address byte (bits 31:24) is usually not 0.
 - CSR2 reads back that byte in bits 15:8. If allocation failures can be injected, check failures at the descriptor allocation and at early and late receive and transmit buffer allocations; each attempt must release all prior allocations and leave the device stopped. Repeat on Windows 7 x64 when a compatible x64 driver build and package are available.
 
 ## 6. Not covered by the VM

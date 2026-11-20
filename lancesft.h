@@ -361,9 +361,8 @@ typedef struct _LANCE_ADAPTER {
     NDIS_PHYSICAL_ADDRESS SharedMemoryPhysicalAddress;
 
     //
-    // Physical base of the 16 MB window that holds all of the DMA memory
-    // (LANCE_DMA_WINDOW_SIZE).  Every packet buffer is allocated inside
-    // it, and its top byte goes into CSR2.
+    // Physical base of the 16 MB window that holds the DMA block
+    // (LANCE_DMA_WINDOW_SIZE).  Its top byte goes into CSR2.
     //
     ULONG DmaWindowBase;
 

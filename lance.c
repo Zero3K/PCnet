@@ -1202,19 +1202,31 @@ Return Value:
     Adapter->NumberOfSmallBuffers = LANCE_64K_NUMBER_OF_SMALL_BUFFERS;
     Adapter->NumberOfMediumBuffers = LANCE_64K_NUMBER_OF_MEDIUM_BUFFERS;
     Adapter->NumberOfLargeBuffers = LANCE_64K_NUMBER_OF_LARGE_BUFFERS;
+    //
+    // One block holds everything the chip touches: init block, rings,
+    // receive buffers and transmit copy buffers, each carved out by
+    // LANCE_ALLOCATE_MEMORY_FOR_HARDWARE in 8-byte steps.  About 60 KB.
+    //
+#define LANCE_HW_ROUND(S) ((((ULONG)(S)) + 7) & ~7UL)
     Adapter->AmountOfHardwareMemory =
-        (((ULONG)sizeof(LANCE_INITIALIZATION_BLOCK) + 7) & ~7UL) +
-        (((ULONG)sizeof(LANCE_TRANSMIT_ENTRY) * Adapter->NumberOfTransmitRings + 7) & ~7UL) +
-        (((ULONG)sizeof(LANCE_RECEIVE_ENTRY) * Adapter->NumberOfReceiveRings + 7) & ~7UL);
+        LANCE_HW_ROUND(sizeof(LANCE_INITIALIZATION_BLOCK)) +
+        LANCE_HW_ROUND(sizeof(LANCE_TRANSMIT_ENTRY) * Adapter->NumberOfTransmitRings) +
+        LANCE_HW_ROUND(sizeof(LANCE_RECEIVE_ENTRY) * Adapter->NumberOfReceiveRings) +
+        LANCE_HW_ROUND(Adapter->SizeOfReceiveBuffer) * Adapter->NumberOfReceiveRings +
+        LANCE_HW_ROUND(LANCE_SMALL_BUFFER_SIZE) * Adapter->NumberOfSmallBuffers +
+        LANCE_HW_ROUND(LANCE_MEDIUM_BUFFER_SIZE) * Adapter->NumberOfMediumBuffers +
+        LANCE_HW_ROUND(LANCE_LARGE_BUFFER_SIZE) * Adapter->NumberOfLargeBuffers;
+#undef LANCE_HW_ROUND
 
     if (LancePciHardwareDetails(Adapter))
     {
         //
-        // The init block and rings can go anywhere below 4 GB, as long
-        // as they do not cross a 16 MB boundary: the chip gets bits 31:24
-        // from CSR2 (see LANCE_DMA_WINDOW_SIZE).  Insisting on the first
-        // 16 MB made this fail early in a cold boot on x64, when that
-        // memory is mostly taken (Code 10).
+        // The block can go anywhere below 4 GB, as long as it does not
+        // cross a 16 MB boundary: the chip gets bits 31:24 of every
+        // address from CSR2 (see LANCE_DMA_WINDOW_SIZE).  Insisting on the
+        // first 16 MB made this fail early in a cold boot on x64, when
+        // that memory is mostly taken (Code 10).  One allocation of about
+        // 60 KB replaces the 101 separate page-sized ones used before.
         //
         NDIS_PHYSICAL_ADDRESS LowestAcceptableAddress =
             NDIS_PHYSICAL_ADDRESS_CONST(0, 0);
@@ -1262,7 +1274,8 @@ Return Value:
             Adapter->SharedMemoryAllocated = TRUE;
 
             //
-            // Every packet buffer has to land in the same 16 MB window.
+            // The boundary keeps the whole block inside one 16 MB window;
+            // CSR2 gets its top byte.
             //
             ASSERT(NdisGetPhysicalAddressHigh(
                        Adapter->SharedMemoryPhysicalAddress) == 0);
@@ -2183,38 +2196,6 @@ LoopBottom:;
 
 #pragma NDIS_PAGEABLE_FUNCTION(AllocateAdapterMemory)
 
-STATIC
-PVOID
-LanceAllocatePacketBuffer(
-    IN PLANCE_ADAPTER Adapter,
-    IN ULONG Size
-    )
-{
-    //
-    // Keep the buffer inside the 16 MB window that holds the init block
-    // and rings: the descriptors only carry address bits 23:0, and CSR2
-    // supplies bits 31:24 for all of them.
-    //
-    NDIS_PHYSICAL_ADDRESS LowestAcceptableAddress;
-    NDIS_PHYSICAL_ADDRESS HighestAcceptableAddress;
-    NDIS_PHYSICAL_ADDRESS NoBoundary = NDIS_PHYSICAL_ADDRESS_CONST(0, 0);
-
-    NdisSetPhysicalAddressHigh(LowestAcceptableAddress, 0);
-    NdisSetPhysicalAddressLow(LowestAcceptableAddress, Adapter->DmaWindowBase);
-    NdisSetPhysicalAddressHigh(HighestAcceptableAddress, 0);
-    NdisSetPhysicalAddressLow(
-        HighestAcceptableAddress,
-        Adapter->DmaWindowBase + (LANCE_DMA_WINDOW_SIZE - 1));
-
-    return MmAllocateContiguousMemorySpecifyCache(
-        Size,
-        LowestAcceptableAddress,
-        HighestAcceptableAddress,
-        NoBoundary,
-        MmNonCached
-        );
-}
-
 BOOLEAN
 AllocateAdapterMemory(
     IN PLANCE_ADAPTER Adapter
@@ -2388,8 +2369,11 @@ Return Value:
         i++,CurrentReceiveEntry++
         ) {
 
-        Adapter->ReceiveVAs[i] =
-            LanceAllocatePacketBuffer(Adapter, Adapter->SizeOfReceiveBuffer);
+        LANCE_ALLOCATE_MEMORY_FOR_HARDWARE(
+            Adapter,
+            Adapter->SizeOfReceiveBuffer,
+            &Adapter->ReceiveVAs[i]
+            );
 
         if (Adapter->ReceiveVAs[i] == NULL) {
             DeleteAdapterMemory(Adapter);
@@ -2479,8 +2463,11 @@ Return Value:
         i++
         ) {
 
-        Adapter->LanceBuffers[i].VirtualLanceBuffer =
-            LanceAllocatePacketBuffer(Adapter, LANCE_SMALL_BUFFER_SIZE);
+        LANCE_ALLOCATE_MEMORY_FOR_HARDWARE(
+            Adapter,
+            LANCE_SMALL_BUFFER_SIZE,
+            &Adapter->LanceBuffers[i].VirtualLanceBuffer
+            );
 
         if (Adapter->LanceBuffers[i].VirtualLanceBuffer == NULL) {
             DeleteAdapterMemory(Adapter);
@@ -2510,8 +2497,11 @@ Return Value:
         i++
         ) {
 
-        Adapter->LanceBuffers[i].VirtualLanceBuffer =
-            LanceAllocatePacketBuffer(Adapter, LANCE_MEDIUM_BUFFER_SIZE);
+        LANCE_ALLOCATE_MEMORY_FOR_HARDWARE(
+            Adapter,
+            LANCE_MEDIUM_BUFFER_SIZE,
+            &Adapter->LanceBuffers[i].VirtualLanceBuffer
+            );
 
         if (Adapter->LanceBuffers[i].VirtualLanceBuffer == NULL) {
             DeleteAdapterMemory(Adapter);
@@ -2540,8 +2530,11 @@ Return Value:
         ) {
 
 
-        Adapter->LanceBuffers[i].VirtualLanceBuffer =
-            LanceAllocatePacketBuffer(Adapter, LANCE_LARGE_BUFFER_SIZE);
+        LANCE_ALLOCATE_MEMORY_FOR_HARDWARE(
+            Adapter,
+            LANCE_LARGE_BUFFER_SIZE,
+            &Adapter->LanceBuffers[i].VirtualLanceBuffer
+            );
 
         if (Adapter->LanceBuffers[i].VirtualLanceBuffer == NULL) {
             DeleteAdapterMemory(Adapter);
@@ -2652,7 +2645,13 @@ Return Value:
 
             if (Adapter->ReceiveVAs[i]) {
 
-                MmFreeContiguousMemory(Adapter->ReceiveVAs[i]);
+                //
+                // Part of the shared block, which the caller frees.
+                //
+                LANCE_DEALLOCATE_MEMORY_FOR_HARDWARE(
+                    Adapter,
+                    Adapter->ReceiveVAs[i]
+                    );
 
             }
 
@@ -2685,7 +2684,11 @@ Return Value:
 
             if (Adapter->LanceBuffers[i].VirtualLanceBuffer) {
 
-                MmFreeContiguousMemory(
+                //
+                // Part of the shared block, which the caller frees.
+                //
+                LANCE_DEALLOCATE_MEMORY_FOR_HARDWARE(
+                    Adapter,
                     Adapter->LanceBuffers[i].VirtualLanceBuffer
                     );
 
