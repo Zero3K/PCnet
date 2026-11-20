@@ -34,7 +34,7 @@ Each entry gives what was wrong, what changed, and how to verify it. The test nu
 
 3. **PCI matching too broad, chip unknown** (`5fe44e4`). The driver now accepts only `1022:2000` and `1022:2001`. After reset it reads CSR88/89 and stores the chip ID, part number and name in the adapter. It prints one `lancepci: <chip>, chip ID …` line at load. *Verify:* that line appears with the expected chip on both VM adapter types.
 
-4. **INF was not a clean NT INF** (`d11fec1`). The INF has `NTx86` and `NTamd64` models for the supported PCI IDs, `Characteristics 0x4`, `BusType 5` and `ndis5`/`ethernet` bindings. It has a single `AddService` and netevent.dll event-log registration. *Verify:* Have Disk install on ReactOS and Server 2003 (TESTING.md, section 3).
+4. **INF was not a clean NT x86 INF** (`d11fec1`). The INF was rewritten as `lancepci.inf`, with an `NTx86`-decorated models section listing only the two PCI IDs, and with `Characteristics 0x4`, `BusType 5` and `ndis5`/`ethernet` bindings. It has a single `AddService` and netevent.dll event-log registration. There is no amd64 section, because the driver is not 64-bit clean (`IoPortBase` is a `ULONG`, and there are pointer↔ULONG casts). *Verify:* Have Disk install on ReactOS and Server 2003 (TESTING.md, section 3).
 
 ### Runtime correctness
 
@@ -77,8 +77,6 @@ Each entry gives what was wrong, what changed, and how to verify it. The test nu
 
 16. **Unchecked receive length** (`2b325a0`). MCNT < 4 or a frame shorter than 14 bytes made the indicated sizes wrap to about 4 GB, and frames over 1514 bytes were indicated as is. All three are now dropped and counted as receive errors. *Verify:* code review. Tests 4 and 6 must still pass at full frame size.
 
-17. **Mapped I/O range truncated on x64.** `NdisMRegisterIoPortRange` returns a pointer-sized mapping, but the adapter stored it in a `ULONG` and truncated derived register addresses. The mapped range is now stored as `PVOID`, with derived port addresses stored as `ULONG_PTR`. *Verify:* Windows 7 x64 tests 3, 9 and 10 (TESTING.md, sections 5 and 8).
-
 ### Reviewed and found correct (no change)
 
 - **24-bit DMA.** The driver allocates its contiguous DMA pool with a highest acceptable address of 0x00FFFFFF, so it lies entirely below 16 MB. Every descriptor and buffer address is taken from that pool. The high byte comes from `(addr >> 16) & 0xff`, and CSR2[15:8] (the upper address byte in 16-bit mode) is written as 0.
@@ -90,10 +88,10 @@ Each entry gives what was wrong, what changed, and how to verify it. The test nu
 - **Am79C970, 79C971 (PCnet-FAST), 79C972 (PCnet-FAST+), 79C975 and 79C978 (PCnet-Home).** VirtualBox emulates only the 79C970A and 79C973, so these need real cards. The 79C971/972/975 should behave like the 79C973 in 16-bit mode. The 79C978 is matched on `1022:2001`, but its HomePNA PHY selection is not handled. The original 79C970 is identified by part 0x2420/0x2430, but the 0x2430 mapping is from memory and should be checked against a real chip.
 - **Windows Server 2003 x86, Windows XP x86, Windows 7 x86.** These are supported targets, since all three load NDIS 5.1 miniports. TESTING.md section 7 has an XP and Windows 7 run of the same checklist. None of them has been run yet.
 - **SMP.** The ISR/RAP synchronization is written for SMP but has only been reviewed.
-- **Windows 7 x64.** The mapped I/O port address storage is pointer-width, but this target has not been tested. It requires an x64 build and a signed or test-signed package.
 
 ## Out of scope
 
+- **Windows 7 x64.** The code is not 64-bit clean. On top of that, x64 Windows only loads kernel drivers signed by a trusted certificate.
 - **Windows 8, 10 and 11.** These versions no longer load NDIS 5.x miniports. Supporting them means a separate driver: an NDIS 6 miniport, built for x64, and attestation-signed through Microsoft's Hardware Dev Center. That would be a new driver, not a fix to this one.
 - **ReactOS upstreaming.** A ReactOS PR is most likely blocked by the license. This code comes from the NT 4.0 DDK sample, and ReactOS needs GPL-compatible code. ReactOS's FastFAT came from Microsoft's MS-PL GitHub samples, which have a different license from this code. ReactOS also already has its own `pcnet` driver.
 
@@ -107,6 +105,7 @@ These are out of scope or need a decision first:
 
 - **No link-state reporting.** There is no `OID_GEN_MEDIA_CONNECT_STATUS` and no `NDIS_STATUS_MEDIA_CONNECT`/`DISCONNECT` indication, so the OS always shows the cable as connected. Fixing this needs a CheckForHang handler that polls the link state (BCR4 LNKST on 79C970A and later). That is new functionality.
 - **No CheckForHang handler.** A wedged chip is never detected or reset.
+- **Not 64-bit clean.** `IoPortBase` is a `ULONG`, and there are pointer/ULONG casts. The INF is x86-only for that reason.
 - **`NdisQueryBuffer`** is used in the send and transfer paths. It maps through `MmMapLockedPages` and bugchecks if the mapping fails under low memory. `NdisQueryBufferSafe` is the NDIS 5.1 replacement.
 - **Filter and multicast sets fail while a MAC-issued reset is in progress** (they return FAILURE instead of pending). This is rare, but a protocol may report the failure.
 - **NDIS-issued reset during a pending set.** The pending set is not completed, on the assumption that NDIS aborts it, as the original NT4 driver assumed. This is worth confirming on ReactOS NDIS.

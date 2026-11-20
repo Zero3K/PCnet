@@ -121,9 +121,9 @@ Notes:
 #define LANCE_64K_NUMBER_OF_MEDIUM_BUFFERS ((UINT)10)
 #define LANCE_64K_NUMBER_OF_LARGE_BUFFERS ((UINT)16)
 
-#define LANCE_ISR_WRITE_RAP(A,C)  NdisRawWritePortUshort((A)->RAP,C)
-#define LANCE_ISR_READ_RDP(A,C)   NdisRawReadPortUshort((A)->RDP,C)
-#define LANCE_ISR_WRITE_RDP(A,C)  NdisRawWritePortUshort((A)->RDP,C)
+#define LANCE_ISR_WRITE_RAP(A,C)  NdisRawWritePortUshort((ULONG)((A)->RAP),C)
+#define LANCE_ISR_READ_RDP(A,C)   NdisRawReadPortUshort((ULONG)((A)->RDP),C)
+#define LANCE_ISR_WRITE_RDP(A,C)   NdisRawWritePortUshort((ULONG)((A)->RDP),C)
 
 
 #define LANCE_GET_LOW_PART_ADDRESS(Adr) \
