@@ -9,6 +9,7 @@
 ; Not for Windows 8, 10 or 11: those no longer load NDIS 5.x miniports.
 ; All PCnet-PCI/FAST parts share PCI ID 1022:2000; the driver identifies
 ; the individual chip at runtime from CSR88/CSR89.
+; VirtualBox differentiates the 79C970A and 79C973 with PCI revisions 0x16 and 0x40.
 
 [Version]
 Signature   = "$Windows NT$"
@@ -21,21 +22,15 @@ DriverVer   = 11/18/2026,1.0.0.0
 %AMD% = AMD, NTx86, NTamd64
 
 [AMD.NTx86]
-%PCNTN5M_970.DeviceDesc%   = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2000
-%PCNTN5M_970A.DeviceDesc%  = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2000
-%PCNTN5M_971.DeviceDesc%   = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2000
-%PCNTN5M_972.DeviceDesc%   = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2000
-%PCNTN5M_973.DeviceDesc%   = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2000
-%PCNTN5M_975.DeviceDesc%   = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2000
+%PCNTN5M_970A.DeviceDesc% = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2000&REV_16
+%PCNTN5M_973.DeviceDesc%  = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2000&REV_40
+%PCNTN5M_PCI.DeviceDesc%  = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2000
 %PCNTN5M_HOME.DeviceDesc%  = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2001
 
 [AMD.NTamd64]
-%PCNTN5M_970.DeviceDesc%   = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2000
-%PCNTN5M_970A.DeviceDesc%  = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2000
-%PCNTN5M_971.DeviceDesc%   = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2000
-%PCNTN5M_972.DeviceDesc%   = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2000
-%PCNTN5M_973.DeviceDesc%   = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2000
-%PCNTN5M_975.DeviceDesc%   = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2000
+%PCNTN5M_970A.DeviceDesc% = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2000&REV_16
+%PCNTN5M_973.DeviceDesc%  = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2000&REV_40
+%PCNTN5M_PCI.DeviceDesc%  = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2000
 %PCNTN5M_HOME.DeviceDesc%  = PCNTN5M_PCI.ndi, PCI\VEN_1022&DEV_2001
 
 [PCNTN5M_PCI.ndi]
@@ -84,10 +79,7 @@ Provider                  = "AMD"
 AMD                       = "AMD"
 DiskName                  = "pcntn5m driver disk"
 PCNTN5M.Service.DispName  = "AMD PCnet NDIS 5.1 miniport (pcntn5m)"
-PCNTN5M_970.DeviceDesc    = "AMD PCnet-PCI Ethernet Adapter (Am79C970)"
+PCNTN5M_PCI.DeviceDesc    = "AMD PCnet-PCI/FAST Ethernet Adapter"
 PCNTN5M_970A.DeviceDesc   = "AMD PCnet-PCI II Ethernet Adapter (Am79C970A)"
-PCNTN5M_971.DeviceDesc    = "AMD PCnet-FAST Ethernet Adapter (Am79C971)"
-PCNTN5M_972.DeviceDesc    = "AMD PCnet-FAST+ Ethernet Adapter (Am79C972)"
 PCNTN5M_973.DeviceDesc    = "AMD PCnet-FAST III Ethernet Adapter (Am79C973)"
-PCNTN5M_975.DeviceDesc    = "AMD PCnet-FAST III Ethernet Adapter (Am79C975)"
 PCNTN5M_HOME.DeviceDesc   = "AMD PCnet-Home Ethernet Adapter (Am79C978)"

@@ -39,13 +39,13 @@ ReactOS ships its own `pcnet.sys` for `PCI\VEN_1022&DEV_2000`. Windows Server 20
 1. Open Device Manager: *Start → Run → `devmgmt.msc`*.
 2. *Network adapters* → the AMD PCnet adapter → *Properties → Driver → Update Driver…*
 3. Choose *Install from a list or specific location* → *Don't search. I will choose the driver to install* → **Have Disk…** → browse to the folder with `pcntn5m.inf`.
-4. Pick the AMD PCnet family adapter matching the hardware and finish. The driver is unsigned, so accept the warning on Server 2003.
+4. Pick the AMD PCnet family adapter and finish. The driver is unsigned, so accept the warning on Server 2003.
 5. Reboot if asked.
 
 Confirm the adapter is running on **pcntn5m.sys**, not the in-box driver:
 
-- Device Manager → adapter → *Properties → Driver → Driver Details* must list `…\system32\drivers\pcntn5m.sys`. The adapter name identifies the supported PCnet model.
-- *Properties → General* shows "This device is working properly".
+- Device Manager → adapter → *Properties → Driver → Driver Details* must list `…\system32\drivers\pcntn5m.sys`.
+- *Properties → General* shows "This device is working properly". VirtualBox's Am79C970A and Am79C973 PCI revisions select their corresponding INF names. Other PCnet-PCI/FAST chips share the base PCI ID and use the generic family name; debug output identifies the specific chip.
 - At a command prompt, `sc query pcntn5m` shows `STATE: 4 RUNNING`.
 - In the debug output (section 4) at load time:
 
