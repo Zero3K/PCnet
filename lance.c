@@ -2809,7 +2809,7 @@ Return Value:
 
         case OID_GEN_MAXIMUM_LOOKAHEAD:
 
-            GenericULong = LANCE_MAX_LOOKAHEAD;
+            GenericULong = LANCE_INDICATED_LOOKAHEAD(Adapter);
 
             break;
 
@@ -2905,7 +2905,12 @@ Return Value:
 
         case OID_GEN_CURRENT_LOOKAHEAD:
 
-            GenericULong = Adapter->SizeOfReceiveBuffer;
+            //
+            // Lookahead excludes the 14-byte header.  Every indication
+            // carries the full LANCE_INDICATED_LOOKAHEAD, which NDIS
+            // allows even if a protocol set a smaller value.
+            //
+            GenericULong = LANCE_INDICATED_LOOKAHEAD(Adapter);
 
             break;
 
@@ -3208,8 +3213,14 @@ Return Value:
 
             LANCE_MOVE_MEMORY(&LookAhead, InfoBuffer, 4);
 
-            if (LookAhead <= (LANCE_MAX_LOOKAHEAD))
+            //
+            // Accept anything up to what we report as the maximum.  The
+            // value is only recorded: indications always carry
+            // LANCE_INDICATED_LOOKAHEAD bytes.
+            //
+            if (LookAhead <= LANCE_INDICATED_LOOKAHEAD(Adapter))
             {
+                Adapter->MaxLookAhead = LookAhead;
                 Status = NDIS_STATUS_SUCCESS;
             }
             else

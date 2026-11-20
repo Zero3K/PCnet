@@ -280,6 +280,15 @@ typedef struct _LANCE_BUFFER_DESCRIPTOR {
 //
 #define LANCE_MAX_LOOKAHEAD ( 248 - LANCE_HEADER_SIZE )
 
+//
+// What a receive indication actually carries after the header: the rest
+// of the first receive buffer (LanceProcessReceiveInterrupts indicates
+// that buffer only).  This is the true maximum lookahead, whatever
+// lookahead a protocol asks for.
+//
+#define LANCE_INDICATED_LOOKAHEAD(A) \
+    ((ULONG)((A)->SizeOfReceiveBuffer - LANCE_HEADER_SIZE))
+
 
 
 
