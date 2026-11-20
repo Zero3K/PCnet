@@ -2,7 +2,7 @@
 
 How to test the driver in a ReactOS x86 VM under VirtualBox. Then repeat the same steps on the other supported targets: Windows Server 2003 x86, Windows XP x86 and Windows 7 x86 (see section 7). Only the install dialogs and the debugger boot switch differ.
 
-Windows 7 x64, Windows 8, Windows 10 and Windows 11 are not supported; CHANGES.md explains why.
+Windows 7 x64 uses an architecture-matched, signed or test-signed driver build and has not been tested yet. Windows 8, Windows 10 and Windows 11 are not supported; CHANGES.md explains why.
 
 Test both emulated chips, one after the other:
 
@@ -101,7 +101,7 @@ Run every item on both adapter types. Write down the result and anything odd in 
 | 7 | Sustained load | Run test 6 while `ping -t 10.0.2.2` runs | No "Request timed out" bursts, no hang, no bugcheck |
 | 8 | Cable unplug | VM *Settings → Network → Adapter 1 → Cable Connected* off (or the network icon in the VM status bar → *Connect Network Adapter*) for 30 s, then back on | Pings fail while unplugged and resume by themselves after replug. No bugcheck, adapter stays enabled. (The driver does not report media-disconnect status; see CHANGES.md.) |
 | 9 | Disable / enable | Device Manager → adapter → *Disable*, then *Enable*. Repeat 5 times | Each enable reloads the driver (chip ID line again), and DHCP and ping work again. No bugcheck on disable, which exercises LanceHalt |
-| 10 | Reboot | Restart from the Start menu, 3 times | Clean shutdown (LanceShutdown stops the chip), and after the next boot tests 1–4 pass |
+| 10 | Reboot | Restart from the Start menu, 3 times; do not disable/enable the adapter | Clean shutdown (LanceShutdown stops the chip); after each boot DHCP succeeds without intervention and tests 1–4 pass |
 | 11 | Cold boot | Power off, then on | Same as 10 |
 | 12 | Promiscuous / multicast (optional) | Run a packet capture tool, if one is available for the guest | Capture starts and stops without breaking connectivity. That exercises the filter-change reset path |
 
@@ -113,7 +113,7 @@ VirtualBox only emulates the 79C970A and 79C973. The 79C970, 79C971 (PCnet-FAST)
 
 ## 7. Windows XP x86 and Windows 7 x86 runs
 
-Run the full checklist in section 5 on each OS, with both adapter types (PCnet-FAST III, then PCnet-PCI II). Use a 32-bit install; the driver will not load on x64. Differences from the ReactOS run:
+Run the full checklist in section 5 on each OS, with both adapter types (PCnet-FAST III, then PCnet-PCI II). This section covers 32-bit installs; use section 8 for Windows 7 x64. Differences from the ReactOS run:
 
 - **In-box driver.** XP and Windows 7 ship AMD's PCnet driver and install it automatically for `PCI\VEN_1022&DEV_2000`. Replace it with Have Disk as in section 3:
   - On XP, the dialogs are the same as on Server 2003.
@@ -130,3 +130,7 @@ Run the full checklist in section 5 on each OS, with both adapter types (PCnet-F
 - **Windows 7 extras.**
   - Check that the *Network and Sharing Center* shows the connection. Since the driver does not report media state, it will never show "Network cable unplugged" (see CHANGES.md).
   - Run test 9 (disable/enable) from the Network Connections folder as well as from Device Manager.
+
+## 8. Windows 7 x64
+
+Build the x64 target and use a signed or test-signed package; 64-bit Windows will not load this unsigned driver. Run the full checklist in section 5 with both VirtualBox adapter types, paying particular attention to test 10: DHCP must work after every boot without disabling or re-enabling the adapter. This target has not yet been tested.

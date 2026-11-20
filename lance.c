@@ -588,16 +588,16 @@ Return Value:
     //
 
     Status = NdisMRegisterIoPortRange(
-        (PVOID *)(&(Adapter->IoPortBase)),
+        &Adapter->IoPortBase,
         MiniportAdapterHandle,
         Adapter->IoBaseAddr,
         0x20
         );
 
-    Adapter->RAP = Adapter->IoPortBase + 0x12;
-    Adapter->RDP = Adapter->IoPortBase + 0x10;
-    Adapter->BDP = Adapter->IoPortBase + 0x16;
-    Adapter->NetworkHardwareAddress = Adapter->IoPortBase;
+    Adapter->RAP = (ULONG_PTR)Adapter->IoPortBase + 0x12;
+    Adapter->RDP = (ULONG_PTR)Adapter->IoPortBase + 0x10;
+    Adapter->BDP = (ULONG_PTR)Adapter->IoPortBase + 0x16;
+    Adapter->NetworkHardwareAddress = (ULONG_PTR)Adapter->IoPortBase;
 
     if (Status != NDIS_STATUS_SUCCESS) {
 
@@ -635,7 +635,7 @@ Fail1:
             MiniportAdapterHandle,
             Adapter->IoBaseAddr,
             0x20,
-            (PVOID)(Adapter->IoPortBase)
+            Adapter->IoPortBase
             );
     }
 
@@ -730,7 +730,7 @@ Return Value:
             Adapter->MiniportAdapterHandle,
             Adapter->IoBaseAddr,
             0x20,
-            (PVOID)(Adapter->IoPortBase)
+            Adapter->IoPortBase
             );
         Adapter->IoPortsRegistered = FALSE;
     }
@@ -1034,7 +1034,7 @@ Return Value:
         return TRUE;
     }
 
-    DbgPrint("pcntn5m: I/O 0x%lx does not answer in 16-bit WIO mode after "
+    DbgPrint("pcntn5m: I/O %p does not answer in 16-bit WIO mode after "
              "reset (RAP readback 0x%04x, CSR0 0x%04x).  The chip may have "
              "been left in 32-bit DWIO mode by another driver; only a "
              "hardware reset (cold boot) clears that.\n",
@@ -1285,7 +1285,8 @@ Return Value:
         // directly since we don't have an Interrupt object yet.
         //
 
-        NdisRawReadPortUshort(Adapter->IoPortBase + 0x14, &ResetValue);
+        NdisRawReadPortUshort((ULONG_PTR)Adapter->IoPortBase + 0x14,
+                              &ResetValue);
         NdisStallExecution(1000);
 
         if (!LanceCheckWioMode(Adapter)) {
@@ -1294,7 +1295,7 @@ Return Value:
                 Adapter->MiniportAdapterHandle,
                 NDIS_ERROR_CODE_HARDWARE_FAILURE,
                 1,
-                (ULONG)Adapter->IoPortBase
+                (ULONG)(ULONG_PTR)Adapter->IoPortBase
                 );
 
             MmFreeContiguousMemory(Adapter->MmMappedBaseAddr);

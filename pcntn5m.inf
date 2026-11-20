@@ -4,8 +4,8 @@
 ; and Am79C978 PCnet-Home, NDIS 5.1 miniport. The chip runs in 16-bit
 ; LANCE mode (SWSTYLE 0) with 24-bit DMA.
 ;
-; The INF declares x86 and amd64 models. The driver is not currently
-; 64-bit clean, so an amd64 package requires a compatible driver build.
+; The INF declares x86 and amd64 models. Use a matching architecture build;
+; Windows x64 requires the driver package to be signed.
 ; Not for Windows 8, 10 or 11: those no longer load NDIS 5.x miniports.
 ; All PCnet-PCI/FAST parts share PCI ID 1022:2000; the driver identifies
 ; the individual chip at runtime from CSR88/CSR89.

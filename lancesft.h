@@ -327,22 +327,22 @@ typedef struct _LANCE_ADAPTER {
     //
     // Pointer to the RAP register.
     //
-    ULONG RAP;
+    ULONG_PTR RAP;
 
     //
     // Pointer to the RDP register.
     //
-    ULONG RDP;
+    ULONG_PTR RDP;
 
     //
     // Pointer to the BDP register on PCI PCnet adapters.
     //
-    ULONG BDP;
+    ULONG_PTR BDP;
 
     //
     // Mapped base address of the PCI register range.
     //
-    ULONG IoPortBase;
+    PVOID IoPortBase;
 
     //
     // PCI PCnet shared-memory pool and bus address.
@@ -362,7 +362,7 @@ typedef struct _LANCE_ADAPTER {
     //
     // Address in memory of the network address
     //
-    ULONG NetworkHardwareAddress;
+    ULONG_PTR NetworkHardwareAddress;
 
     //
     // The network address from the hardware.
