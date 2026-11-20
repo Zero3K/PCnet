@@ -251,10 +251,9 @@ typedef struct _LANCE_RECEIVE_ENTRY {
 #define LANCE_SET_RECEIVE_BUFFER_ADDRESS(Adptr,Rd,Adr) \
 { \
     PVOID _Adr = (Adr); \
-    PLANCE_ADAPTER _Adptr = (Adptr);\
     PLANCE_RECEIVE_ENTRY _Rd = (Rd); \
     ULONG _Offset;\
-    _Offset = LANCE_GET_HARDWARE_PHYSICAL_ADDRESS(_Adptr, _Adr);\
+    _Offset = NdisGetPhysicalAddressLow(MmGetPhysicalAddress(_Adr));\
     LANCE_WRITE_HARDWARE_LOW_PART_ADDRESS(\
         _Rd->LowReceiveBufferAddress,\
         (USHORT)((ULONG)_Offset) & 0xffff); \
@@ -386,8 +385,7 @@ typedef struct _LANCE_TRANSMIT_ENTRY {
     PVOID _Adr = (Adr); \
     PLANCE_TRANSMIT_ENTRY _Td = (Td); \
     ULONG _Offset;\
-    PLANCE_ADAPTER _Adptr = (Adptr);\
-    _Offset = LANCE_GET_HARDWARE_PHYSICAL_ADDRESS(_Adptr, _Adr);\
+    _Offset = NdisGetPhysicalAddressLow(MmGetPhysicalAddress(_Adr));\
     LANCE_WRITE_HARDWARE_LOW_PART_ADDRESS(\
         _Td->LowTransmitBufferAddress,\
         (USHORT)(((ULONG)_Offset) & 0xffff)\
