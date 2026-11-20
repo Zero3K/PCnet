@@ -149,6 +149,18 @@ Return Value:
     UINT LocalBytesTransferred = 0;
 
     //
+    // FAILURE if a destination buffer could not be mapped, so the
+    // protocol doesn't take a short copy for a good packet.
+    //
+    NDIS_STATUS Status = NDIS_STATUS_SUCCESS;
+
+    //
+    // Bytes of the packet held in the receive buffers before the current
+    // one.  The last buffer holds the message size minus this.
+    //
+    UINT SourceBytesBefore = 0;
+
+    //
     // Index in the ring of the current receive ring descriptor.
     //
     UINT CurrentSourceIndex;
@@ -198,6 +210,7 @@ Return Value:
 
         if ((DestinationVirtualAddress == NULL) &&
             (DestinationCurrentLength != 0)) {
+            Status = NDIS_STATUS_FAILURE;
             goto TransferDataComplete;
         }
 
@@ -217,7 +230,6 @@ Return Value:
             // ring entry that has the total packet data length.
             //
             LANCE_GET_MESSAGE_SIZE(CurrentEntry, SourceCurrentLength);
-            SourceCurrentLength -= LocalBytesTransferred;
 
         } else {
 
@@ -260,6 +272,7 @@ Return Value:
                                 );
                 if ((DestinationVirtualAddress == NULL) &&
                     (DestinationCurrentLength != 0)) {
+                    Status = NDIS_STATUS_FAILURE;
                     break;
                 }
                 continue;
@@ -298,16 +311,22 @@ Return Value:
 
                 }
 
+                SourceBytesBefore += Adapter->SizeOfReceiveBuffer;
+
                 if (CurrentSourceIndex == LastBuffer) {
 
                     //
                     // The last buffer might only be partially
-                    // filled with transmitted data.  There is
-                    // a field in the last ring entry that has
-                    // the total packet data length.
+                    // filled with transmitted data.  The last ring
+                    // entry has the total packet length; this buffer
+                    // holds what the earlier, full buffers didn't.
+                    // (Subtracting the bytes copied so far, as before,
+                    // ignored the header and the starting offset.)
                     //
                     LANCE_GET_MESSAGE_SIZE(CurrentEntry, SourceCurrentLength);
-                    SourceCurrentLength -= LocalBytesTransferred;
+                    SourceCurrentLength =
+                        (SourceCurrentLength > SourceBytesBefore) ?
+                            (SourceCurrentLength - SourceBytesBefore) : 0;
 
                 } else {
 
@@ -399,5 +418,5 @@ Return Value:
 TransferDataComplete:
     LANCE_DO_DEFERRED(Adapter);
 
-    return NDIS_STATUS_SUCCESS;
+    return Status;
 }

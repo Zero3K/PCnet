@@ -85,6 +85,7 @@ UINT LanceGlobalSupportedOids[] = {
     OID_GEN_VENDOR_ID,
     OID_GEN_VENDOR_DESCRIPTION,
     OID_GEN_DRIVER_VERSION,
+    OID_GEN_MEDIA_CONNECT_STATUS,
     OID_GEN_CURRENT_PACKET_FILTER,
     OID_GEN_CURRENT_LOOKAHEAD,
     OID_GEN_XMIT_OK,
@@ -265,6 +266,12 @@ LanceSyncStartInit(
     IN PVOID Context
     );
 
+STATIC
+BOOLEAN
+LanceSyncPollInitDone(
+    IN PVOID Context
+    );
+
 VOID
 StartAdapterReset(
     IN PLANCE_ADAPTER Adapter
@@ -274,6 +281,12 @@ VOID
 SetupForReset(
     IN PLANCE_ADAPTER Adapter,
     IN NDIS_REQUEST_TYPE RequestType
+    );
+
+STATIC
+VOID
+LanceQueueSetBehindReset(
+    IN PLANCE_ADAPTER Adapter
     );
 
 NDIS_STATUS
@@ -339,7 +352,7 @@ Return Value:
     NdisZeroMemory(&LanceChar, sizeof(LanceChar));
     LanceChar.MajorNdisVersion = LANCE_NDIS_MAJOR_VERSION;
     LanceChar.MinorNdisVersion = LANCE_NDIS_MINOR_VERSION;
-    LanceChar.CheckForHangHandler = NULL;
+    LanceChar.CheckForHangHandler = LanceCheckForHang;
     LanceChar.DisableInterruptHandler = LanceDisableInterrupt;
     LanceChar.EnableInterruptHandler = LanceEnableInterrupt;
     LanceChar.HaltHandler = LanceHalt;
@@ -464,6 +477,7 @@ Return Value:
     LANCE_ZERO_MEMORY(Adapter, sizeof(LANCE_ADAPTER));
 
     Adapter->MaxLookAhead = LANCE_MAX_LOOKAHEAD;
+    Adapter->MediaConnected = TRUE;
 
     Adapter->MiniportAdapterHandle = MiniportAdapterHandle;
     Adapter->BeingRemoved = FALSE;
@@ -585,12 +599,24 @@ Return Value:
     // Register the IoPortRanges
     //
 
-    Status = NdisMRegisterIoPortRange(
-        (PVOID *)(&(Adapter->IoPortBase)),
-        MiniportAdapterHandle,
-        Adapter->IoBaseAddr,
-        0x20
-        );
+    {
+        //
+        // NdisMRegisterIoPortRange writes a PVOID.  IoPortBase is a ULONG,
+        // so on x64 passing its address let the call write 8 bytes over
+        // it and the fields after it.  On x86 and x64 the mapped value is
+        // the I/O port number itself, so the ULONG holds it.
+        //
+        PVOID MappedPortBase = NULL;
+
+        Status = NdisMRegisterIoPortRange(
+            &MappedPortBase,
+            MiniportAdapterHandle,
+            Adapter->IoBaseAddr,
+            0x20
+            );
+
+        Adapter->IoPortBase = (ULONG)(ULONG_PTR)MappedPortBase;
+    }
 
     Adapter->RAP = Adapter->IoPortBase + 0x12;
     Adapter->RDP = Adapter->IoPortBase + 0x10;
@@ -674,6 +700,21 @@ Return Value:
     LOG(REMOVE);
 
     //
+    // 0. Halt does not hold the miniport lock, so on another CPU the
+    //    deferred timer can be running a pending reset right now.  Left
+    //    alone, it could INIT the chip again after step 1 stops it, or
+    //    synchronize with the interrupt after step 2 has deregistered it.
+    //    Block any new reset or timer, then wait for one that is already
+    //    running to finish.
+    //
+    Adapter->Halting = TRUE;
+    Adapter->ResetInProgress = FALSE;
+    KeMemoryBarrier();
+
+    NdisMCancelTimer(&Adapter->DeferredTimer, &TimerCancelled);
+    KeFlushQueuedDpcs();
+
+    //
     // 1. Stop the chip, synchronized with the ISR so the RAP write cannot
     //    land between the ISR's RAP save and restore on another CPU.
     //    After a surprise removal there is no chip to stop.
@@ -694,19 +735,12 @@ Return Value:
     NdisMDeregisterInterrupt(&(Adapter->Interrupt));
 
     //
-    // 3. Stop deferred timer processing before freeing the adapter.
+    // 3. Nothing can arm the timer since step 0 (LANCE_DO_DEFERRED checks
+    //    Halting).  Cancel it once more and flush, so nothing that was
+    //    already queued can run after the memory is freed.
     //
-    Adapter->ResetInProgress = FALSE;
     NdisMCancelTimer(&Adapter->DeferredTimer, &TimerCancelled);
-    if (!TimerCancelled)
-    {
-        KeFlushQueuedDpcs();
-        NdisMCancelTimer(&Adapter->DeferredTimer, &TimerCancelled);
-        if (!TimerCancelled)
-        {
-            KeFlushQueuedDpcs();
-        }
-    }
+    KeFlushQueuedDpcs();
 
     //
     // 4. With the chip stopped and nothing left to call back into us,
@@ -736,6 +770,125 @@ Return Value:
     NdisFreeMemory(Adapter, sizeof(LANCE_ADAPTER), 0);
 
     return;
+}
+
+
+STATIC
+BOOLEAN
+LanceSyncReadBcr4(
+    IN PVOID Context
+    )
+
+/*++
+
+Routine Description:
+
+    Reads BCR4 with the ISR locked out, then puts RAP back on CSR0,
+    where the rest of the driver expects it.
+
+--*/
+
+{
+    PLANCE_ADAPTER Adapter = (PLANCE_ADAPTER)Context;
+    USHORT Bcr4;
+
+    LANCE_ISR_WRITE_RAP(Adapter, LANCE_SELECT_BCR4);
+    NdisRawReadPortUshort(Adapter->BDP, &Bcr4);
+    LANCE_ISR_WRITE_RAP(Adapter, LANCE_SELECT_CSR0);
+
+    Adapter->Bcr4 = Bcr4;
+
+    return TRUE;
+}
+
+
+BOOLEAN
+LanceCheckForHang(
+    IN NDIS_HANDLE MiniportAdapterContext
+    )
+
+/*++
+
+Routine Description:
+
+    NDIS calls this about every 2 seconds.  The driver has no hang
+    detection of its own (NDIS already resets it when sends or requests
+    time out), so it always returns FALSE.  It uses the call to poll the
+    link status in BCR4 and tells NDIS when the cable is unplugged or
+    plugged back in.
+
+    A disconnect is only reported after BCR4 has shown the link up at
+    least once.  If a chip or emulator doesn't implement the link bit,
+    the adapter therefore stays "connected", as it always was before,
+    instead of being stuck offline.
+
+--*/
+
+{
+    PLANCE_ADAPTER Adapter =
+        PLANCE_ADAPTER_FROM_CONTEXT_HANDLE(MiniportAdapterContext);
+    USHORT Bcr4;
+    BOOLEAN LinkUp;
+
+    //
+    // The original PCnet-PCI (79C970) is left out: its BCR4 is not
+    // documented the same way.
+    //
+    if (Adapter->ResetInProgress ||
+        Adapter->HardwareFailure ||
+        Adapter->SurpriseRemoved ||
+        Adapter->Halting ||
+        (Adapter->ChipPart == PCNET_PART_79C970) ||
+        (Adapter->ChipPart == PCNET_PART_79C970_ALT))
+    {
+        return FALSE;
+    }
+
+    NdisMSynchronizeWithInterrupt(
+        &Adapter->Interrupt,
+        LanceSyncReadBcr4,
+        (PVOID)Adapter
+        );
+
+    Bcr4 = Adapter->Bcr4;
+
+    //
+    // LEDOUT is the link status only when LNKSTE is the only LED source
+    // enabled in bits 6:0 and the polarity isn't inverted (the reset
+    // default, 0x00C0).
+    //
+    if ((Bcr4 == 0xffff) ||
+        (Bcr4 & LANCE_BCR4_LEDPOL) ||
+        ((Bcr4 & LANCE_BCR4_SOURCES_6_0) != LANCE_BCR4_LNKSTE))
+    {
+        return FALSE;
+    }
+
+    LinkUp = (BOOLEAN)((Bcr4 & LANCE_BCR4_LEDOUT) != 0);
+
+    if (LinkUp)
+    {
+        Adapter->LinkStatusTrusted = TRUE;
+    }
+    else if (!Adapter->LinkStatusTrusted)
+    {
+        return FALSE;
+    }
+
+    if (LinkUp != Adapter->MediaConnected)
+    {
+        Adapter->MediaConnected = LinkUp;
+
+        NdisMIndicateStatus(
+            Adapter->MiniportAdapterHandle,
+            LinkUp ? NDIS_STATUS_MEDIA_CONNECT : NDIS_STATUS_MEDIA_DISCONNECT,
+            NULL,
+            0
+            );
+        NdisMIndicateStatusComplete(Adapter->MiniportAdapterHandle);
+    }
+
+    return FALSE;
 }
 
 
@@ -1170,17 +1323,38 @@ Return Value:
     Adapter->NumberOfSmallBuffers = LANCE_64K_NUMBER_OF_SMALL_BUFFERS;
     Adapter->NumberOfMediumBuffers = LANCE_64K_NUMBER_OF_MEDIUM_BUFFERS;
     Adapter->NumberOfLargeBuffers = LANCE_64K_NUMBER_OF_LARGE_BUFFERS;
+    //
+    // One block holds everything the chip touches: init block, rings,
+    // receive buffers and transmit copy buffers, each carved out by
+    // LANCE_ALLOCATE_MEMORY_FOR_HARDWARE in 8-byte steps.  About 60 KB.
+    //
+#define LANCE_HW_ROUND(S) ((((ULONG)(S)) + 7) & ~7UL)
     Adapter->AmountOfHardwareMemory =
-        (((ULONG)sizeof(LANCE_INITIALIZATION_BLOCK) + 7) & ~7UL) +
-        (((ULONG)sizeof(LANCE_TRANSMIT_ENTRY) * Adapter->NumberOfTransmitRings + 7) & ~7UL) +
-        (((ULONG)sizeof(LANCE_RECEIVE_ENTRY) * Adapter->NumberOfReceiveRings + 7) & ~7UL);
+        LANCE_HW_ROUND(sizeof(LANCE_INITIALIZATION_BLOCK)) +
+        LANCE_HW_ROUND(sizeof(LANCE_TRANSMIT_ENTRY) * Adapter->NumberOfTransmitRings) +
+        LANCE_HW_ROUND(sizeof(LANCE_RECEIVE_ENTRY) * Adapter->NumberOfReceiveRings) +
+        LANCE_HW_ROUND(Adapter->SizeOfReceiveBuffer) * Adapter->NumberOfReceiveRings +
+        LANCE_HW_ROUND(LANCE_SMALL_BUFFER_SIZE) * Adapter->NumberOfSmallBuffers +
+        LANCE_HW_ROUND(LANCE_MEDIUM_BUFFER_SIZE) * Adapter->NumberOfMediumBuffers +
+        LANCE_HW_ROUND(LANCE_LARGE_BUFFER_SIZE) * Adapter->NumberOfLargeBuffers;
+#undef LANCE_HW_ROUND
 
     if (LancePciHardwareDetails(Adapter))
     {
+        //
+        // The block can go anywhere below 4 GB, as long as it does not
+        // cross a 16 MB boundary: the chip gets bits 31:24 of every
+        // address from CSR2 (see LANCE_DMA_WINDOW_SIZE).  Insisting on the
+        // first 16 MB made this fail early in a cold boot on x64, when
+        // that memory is mostly taken (Code 10).  One allocation of about
+        // 60 KB replaces the 101 separate page-sized ones used before.
+        //
         NDIS_PHYSICAL_ADDRESS LowestAcceptableAddress =
             NDIS_PHYSICAL_ADDRESS_CONST(0, 0);
         NDIS_PHYSICAL_ADDRESS HighestAcceptableAddress =
-            NDIS_PHYSICAL_ADDRESS_CONST(0x00FFFFFF, 0);
+            NDIS_PHYSICAL_ADDRESS_CONST(0xFFFFFFFF, 0);
+        NDIS_PHYSICAL_ADDRESS DmaWindowBoundary =
+            NDIS_PHYSICAL_ADDRESS_CONST(LANCE_DMA_WINDOW_SIZE, 0);
 
         //
         // Get hold of the RAP and RDP address as well
@@ -1209,7 +1383,7 @@ Return Value:
             Adapter->AmountOfHardwareMemory,
             LowestAcceptableAddress,
             HighestAcceptableAddress,
-            LowestAcceptableAddress,
+            DmaWindowBoundary,
             MmNonCached
             );
 
@@ -1219,6 +1393,17 @@ Return Value:
             Adapter->SharedMemoryPhysicalAddress =
                 MmGetPhysicalAddress(Adapter->MmMappedBaseAddr);
             Adapter->SharedMemoryAllocated = TRUE;
+
+            //
+            // The boundary keeps the whole block inside one 16 MB window;
+            // CSR2 gets its top byte.
+            //
+            ASSERT(NdisGetPhysicalAddressHigh(
+                       Adapter->SharedMemoryPhysicalAddress) == 0);
+            Adapter->DmaWindowBase =
+                NdisGetPhysicalAddressLow(
+                    Adapter->SharedMemoryPhysicalAddress) &
+                LANCE_DMA_WINDOW_MASK;
         }
         else
         {
@@ -1453,13 +1638,21 @@ Return Value:
 
     //
     // LanceIsr clears FirstInitialization when it sees IDON.  Initializing
-    // takes microseconds; give up after about half a second.
+    // takes microseconds, but early in a cold boot the interrupt can be
+    // late or lost, which used to fail the start with Code 10.  So also
+    // look at CSR0 ourselves every 10 ms, and give up after 2 seconds.
     //
-    for (i = 0;
-         (i < 50) && *(volatile BOOLEAN *)&Adapter->FirstInitialization;
-         i++)
+    for (i = 0; i < 200; i++)
     {
         NdisMSleep(10000);
+
+        if (NdisMSynchronizeWithInterrupt(
+                &Adapter->Interrupt,
+                LanceSyncPollInitDone,
+                (PVOID)Adapter))
+        {
+            break;
+        }
     }
 
     //
@@ -1508,7 +1701,12 @@ Return Value:
 
 {
 
-    if (Adapter->ResetInProgress) {
+    //
+    // Never restart the chip once LanceHalt has begun: an IDON still
+    // being handled in the DPC would otherwise start it again after
+    // Halt stopped it, with its memory about to be freed.
+    //
+    if (Adapter->ResetInProgress || Adapter->Halting) {
 
         return;
 
@@ -1659,6 +1857,59 @@ LanceSyncReadInterruptStatus(
                             ~LANCE_CSR0_TRANSMITTER_ON) |
                            (Csr & LANCE_CSR0_TRANSMITTER_ON));
     Status->Adapter->PendingInterruptStatus = 0;
+
+    return TRUE;
+}
+
+STATIC
+BOOLEAN
+LanceSyncPollInitDone(
+    IN PVOID Context
+    )
+
+/*++
+
+Routine Description:
+
+    Used by LanceInitialInit, with the ISR locked out, to check for IDON
+    without depending on the interrupt.  If CSR0 shows IDON before the
+    ISR has seen it, acknowledge it the same way the ISR would.
+
+Return Value:
+
+    TRUE once the first initialization is done.
+
+--*/
+
+{
+    PLANCE_ADAPTER Adapter = (PLANCE_ADAPTER)Context;
+    USHORT Csr;
+
+    if (!Adapter->FirstInitialization)
+    {
+        return TRUE;
+    }
+
+    LANCE_ISR_WRITE_RAP(Adapter, LANCE_SELECT_CSR0);
+    LANCE_ISR_READ_RDP(Adapter, &Csr);
+
+    if ((Csr == 0xffff) || !(Csr & LANCE_CSR0_INITIALIZATION_DONE))
+    {
+        return FALSE;
+    }
+
+    //
+    // IDON is write-one-to-clear; the other command bits ignore a zero.
+    //
+    LANCE_ISR_WRITE_RDP(
+        Adapter,
+        (USHORT)(LANCE_CSR0_INITIALIZATION_DONE | LANCE_CSR0_INTERRUPT_ENABLE)
+    );
+
+    Adapter->FirstInitialization = FALSE;
+
+    DbgPrint("PCnet: IDON found by polling CSR0 (0x%04x); "
+             "the init interrupt was not delivered.\n", Csr);
 
     return TRUE;
 }
@@ -1849,6 +2100,23 @@ Return Value:
             Adapter->ResetInProgress = FALSE;
             Adapter->ResetInitStarted = FALSE;
 
+            if (Adapter->ReinitAfterReset)
+            {
+                Adapter->ReinitAfterReset = FALSE;
+
+                if (!Adapter->Halting)
+                {
+                    //
+                    // A filter or multicast set came in after this INIT
+                    // had already read the old init block (see
+                    // LanceQueueSetBehindReset).  Reset once more to load
+                    // it; the set completes at that IDON.
+                    //
+                    SetupForReset(Adapter, NdisRequestGeneric4);
+                    goto LoopBottom;
+                }
+            }
+
             //
             // Take a copy and clear the flags first: completing a request
             // can lead NDIS straight back into us with another one that
@@ -1905,7 +2173,8 @@ Return Value:
         // it is safe to start the reset.
         //
         if (Adapter->ResetInProgress &&
-            !Adapter->ResetInitStarted
+            !Adapter->ResetInitStarted &&
+            !Adapter->Halting
         )
         {
 #if LANCE_TRACE
@@ -2047,26 +2316,6 @@ LoopBottom:;
 }
 
 #pragma NDIS_PAGEABLE_FUNCTION(AllocateAdapterMemory)
-
-STATIC
-PVOID
-LanceAllocatePacketBuffer(
-    IN ULONG Size
-    )
-{
-    NDIS_PHYSICAL_ADDRESS LowestAcceptableAddress =
-        NDIS_PHYSICAL_ADDRESS_CONST(0, 0);
-    NDIS_PHYSICAL_ADDRESS HighestAcceptableAddress =
-        NDIS_PHYSICAL_ADDRESS_CONST(0x00FFFFFF, 0);
-
-    return MmAllocateContiguousMemorySpecifyCache(
-        Size,
-        LowestAcceptableAddress,
-        HighestAcceptableAddress,
-        LowestAcceptableAddress,
-        MmNonCached
-        );
-}
 
 BOOLEAN
 AllocateAdapterMemory(
@@ -2241,8 +2490,11 @@ Return Value:
         i++,CurrentReceiveEntry++
         ) {
 
-        Adapter->ReceiveVAs[i] =
-            LanceAllocatePacketBuffer(Adapter->SizeOfReceiveBuffer);
+        LANCE_ALLOCATE_MEMORY_FOR_HARDWARE(
+            Adapter,
+            Adapter->SizeOfReceiveBuffer,
+            &Adapter->ReceiveVAs[i]
+            );
 
         if (Adapter->ReceiveVAs[i] == NULL) {
             DeleteAdapterMemory(Adapter);
@@ -2332,8 +2584,11 @@ Return Value:
         i++
         ) {
 
-        Adapter->LanceBuffers[i].VirtualLanceBuffer =
-            LanceAllocatePacketBuffer(LANCE_SMALL_BUFFER_SIZE);
+        LANCE_ALLOCATE_MEMORY_FOR_HARDWARE(
+            Adapter,
+            LANCE_SMALL_BUFFER_SIZE,
+            &Adapter->LanceBuffers[i].VirtualLanceBuffer
+            );
 
         if (Adapter->LanceBuffers[i].VirtualLanceBuffer == NULL) {
             DeleteAdapterMemory(Adapter);
@@ -2363,8 +2618,11 @@ Return Value:
         i++
         ) {
 
-        Adapter->LanceBuffers[i].VirtualLanceBuffer =
-            LanceAllocatePacketBuffer(LANCE_MEDIUM_BUFFER_SIZE);
+        LANCE_ALLOCATE_MEMORY_FOR_HARDWARE(
+            Adapter,
+            LANCE_MEDIUM_BUFFER_SIZE,
+            &Adapter->LanceBuffers[i].VirtualLanceBuffer
+            );
 
         if (Adapter->LanceBuffers[i].VirtualLanceBuffer == NULL) {
             DeleteAdapterMemory(Adapter);
@@ -2393,8 +2651,11 @@ Return Value:
         ) {
 
 
-        Adapter->LanceBuffers[i].VirtualLanceBuffer =
-            LanceAllocatePacketBuffer(LANCE_LARGE_BUFFER_SIZE);
+        LANCE_ALLOCATE_MEMORY_FOR_HARDWARE(
+            Adapter,
+            LANCE_LARGE_BUFFER_SIZE,
+            &Adapter->LanceBuffers[i].VirtualLanceBuffer
+            );
 
         if (Adapter->LanceBuffers[i].VirtualLanceBuffer == NULL) {
             DeleteAdapterMemory(Adapter);
@@ -2505,7 +2766,13 @@ Return Value:
 
             if (Adapter->ReceiveVAs[i]) {
 
-                MmFreeContiguousMemory(Adapter->ReceiveVAs[i]);
+                //
+                // Part of the shared block, which the caller frees.
+                //
+                LANCE_DEALLOCATE_MEMORY_FOR_HARDWARE(
+                    Adapter,
+                    Adapter->ReceiveVAs[i]
+                    );
 
             }
 
@@ -2538,7 +2805,11 @@ Return Value:
 
             if (Adapter->LanceBuffers[i].VirtualLanceBuffer) {
 
-                MmFreeContiguousMemory(
+                //
+                // Part of the shared block, which the caller frees.
+                //
+                LANCE_DEALLOCATE_MEMORY_FOR_HARDWARE(
+                    Adapter,
                     Adapter->LanceBuffers[i].VirtualLanceBuffer
                     );
 
@@ -2685,7 +2956,7 @@ Return Value:
 
         case OID_GEN_MAXIMUM_LOOKAHEAD:
 
-            GenericULong = LANCE_MAX_LOOKAHEAD;
+            GenericULong = LANCE_INDICATED_LOOKAHEAD(Adapter);
 
             break;
 
@@ -2779,9 +3050,22 @@ Return Value:
             MoveBytes = sizeof(GenericUShort);
             break;
 
+        case OID_GEN_MEDIA_CONNECT_STATUS:
+
+            GenericULong = (ULONG)(Adapter->MediaConnected ?
+                                   NdisMediaStateConnected :
+                                   NdisMediaStateDisconnected);
+
+            break;
+
         case OID_GEN_CURRENT_LOOKAHEAD:
 
-            GenericULong = Adapter->SizeOfReceiveBuffer;
+            //
+            // Lookahead excludes the 14-byte header.  Every indication
+            // carries the full LANCE_INDICATED_LOOKAHEAD, which NDIS
+            // allows even if a protocol set a smaller value.
+            //
+            GenericULong = LANCE_INDICATED_LOOKAHEAD(Adapter);
 
             break;
 
@@ -3084,8 +3368,14 @@ Return Value:
 
             LANCE_MOVE_MEMORY(&LookAhead, InfoBuffer, 4);
 
-            if (LookAhead <= (LANCE_MAX_LOOKAHEAD))
+            //
+            // Accept anything up to what we report as the maximum.  The
+            // value is only recorded: indications always carry
+            // LANCE_INDICATED_LOOKAHEAD bytes.
+            //
+            if (LookAhead <= LANCE_INDICATED_LOOKAHEAD(Adapter))
             {
+                Adapter->MaxLookAhead = LookAhead;
                 Status = NDIS_STATUS_SUCCESS;
             }
             else
@@ -3177,7 +3467,9 @@ Return Value:
     // Check to see if the device is already resetting.
     //
 
-    if (Adapter->ResetInProgress || Adapter->HardwareFailure)
+    if (Adapter->HardwareFailure ||
+        (Adapter->ResetInProgress &&
+         (NdisRequestType != NdisRequestSetInformation)))
     {
         return(NDIS_STATUS_FAILURE);
     }
@@ -3187,7 +3479,14 @@ Return Value:
     //
     Adapter->PacketFilter = PacketFilter;
 
-    SetupForReset(Adapter, NdisRequestType);
+    if (Adapter->ResetInProgress)
+    {
+        LanceQueueSetBehindReset(Adapter);
+    }
+    else
+    {
+        SetupForReset(Adapter, NdisRequestType);
+    }
 
 #if LANCE_TRACE
     DbgPrint("Out LanceSetPacketFilter\n");
@@ -3302,9 +3601,11 @@ Return Value:
 
     //
     // Check to see if the device is already resetting.  If it is
-    // then pend this add.
+    // then pend this add behind that reset.
     //
-    if (Adapter->ResetInProgress || Adapter->HardwareFailure)
+    if (Adapter->HardwareFailure ||
+        (Adapter->ResetInProgress &&
+         (NdisRequestType != NdisRequestSetInformation)))
     {
 
         return(NDIS_STATUS_FAILURE);
@@ -3321,7 +3622,14 @@ Return Value:
         NewAddressCount * LANCE_LENGTH_OF_ADDRESS
     );
 
-    SetupForReset(Adapter, NdisRequestType);
+    if (Adapter->ResetInProgress)
+    {
+        LanceQueueSetBehindReset(Adapter);
+    }
+    else
+    {
+        SetupForReset(Adapter, NdisRequestType);
+    }
 
 
 #if LANCE_TRACE
@@ -4514,11 +4822,15 @@ LanceSyncStartInit(
 
     //
     // Write the address of the initialization block to csr1 and csr2.
+    // CSR2[15:8] is IADR[31:24]: in 16-bit mode the chip puts it on top
+    // of every 24-bit address it uses, so it selects the DMA window.
     //
+    ASSERT((PhysAdr & LANCE_DMA_WINDOW_MASK) == Adapter->DmaWindowBase);
+
     LANCE_WRITE_RAP(Adapter, LANCE_SELECT_CSR1);
     LANCE_WRITE_RDP(Adapter, LANCE_GET_LOW_PART_ADDRESS(PhysAdr));
     LANCE_WRITE_RAP(Adapter, LANCE_SELECT_CSR2);
-    LANCE_WRITE_RDP(Adapter, LANCE_GET_HIGH_PART_ADDRESS(PhysAdr));
+    LANCE_WRITE_RDP(Adapter, LANCE_GET_CSR2_ADDRESS(PhysAdr));
 
     //
     // Write to csr0 to initialize the chip.
@@ -4529,6 +4841,48 @@ LanceSyncStartInit(
     return(FALSE);
 }
 
+STATIC
+VOID
+LanceQueueSetBehindReset(
+    IN PLANCE_ADAPTER Adapter
+    )
+
+/*++
+
+Routine Description:
+
+    A filter or multicast set arrived while a reset the driver started
+    itself (memory error, babble, transmitter stopped) is still running.
+    It used to fail, and if TCP/IP's filter set at bind time landed here
+    nothing was received.  The caller has already stored the new value;
+    this makes the running reset carry it and complete the request.
+
+    NDIS sends one request at a time and none during MiniportReset, so
+    no other completion is owed at this point.
+
+--*/
+
+{
+    ASSERT(Adapter->ResetInProgress);
+    ASSERT(!Adapter->SetInformationPending && !Adapter->ResetPending);
+
+    Adapter->SetInformationPending = TRUE;
+
+    if (Adapter->ResetInitStarted)
+    {
+        //
+        // INIT was issued with the old init block.  The IDON handler
+        // will run one more reset to load the new one.
+        //
+        Adapter->ReinitAfterReset = TRUE;
+    }
+
+    //
+    // Otherwise StartAdapterReset has not run yet, and it builds the init
+    // block from the values just stored.
+    //
+}
+
 STATIC
 VOID
 SetupForReset(
@@ -4605,6 +4959,12 @@ Return Value:
             //
             Adapter->ResetPending = TRUE;
             Adapter->SetInformationPending = FALSE;
+
+            //
+            // This reset rebuilds the init block from the current values
+            // anyway, so no extra reset is needed afterwards.
+            //
+            Adapter->ReinitAfterReset = FALSE;
             break;
 
         default:

@@ -42,8 +42,20 @@ Notes:
 #define LANCE_SELECT_CSR4  ((USHORT)4)
 #define LANCE_SELECT_CSR88 ((USHORT)88)
 #define LANCE_SELECT_CSR89 ((USHORT)89)
+#define LANCE_SELECT_BCR4  ((USHORT)4)
 #define LANCE_SELECT_BCR18 ((USHORT)18)
 #define LANCE_SELECT_BCR20 ((USHORT)20)
+
+//
+// BCR4 (LED0 control, link status by default: 0x00C0 after reset).
+// LEDOUT shows the OR of the enabled LED sources.  With only LNKSTE
+// enabled among bits 6:0 it is the link status.  LEDPOL inverts the
+// pin, so the driver doesn't use BCR4 for link status when it's set.
+//
+#define LANCE_BCR4_LEDOUT       ((USHORT)0x8000)
+#define LANCE_BCR4_LEDPOL       ((USHORT)0x4000)
+#define LANCE_BCR4_LNKSTE       ((USHORT)0x0040)
+#define LANCE_BCR4_SOURCES_6_0  ((USHORT)0x007f)
 
 //
 // CSR4 (test and features control).  The xxxM bits mask the matching
@@ -131,6 +143,24 @@ Notes:
 
 #define LANCE_GET_HIGH_PART_ADDRESS(Adr) \
     ((UCHAR)(((ULONG)(Adr) >> 16) & 0xff))
+
+//
+// In 16-bit software style (SWSTYLE 0, SSIZE32 0) the init block and the
+// descriptors only hold 24-bit addresses.  The PCnet-PCI chips take bits
+// 31:24 of every bus-master address (init block, rings and buffers) from
+// CSR2[15:8], IADR[31:24].  So the DMA memory does not have to be below
+// 16 MB; it has to sit in one 16 MB-aligned window below 4 GB, and CSR2
+// has to carry that window's top byte.
+//
+#define LANCE_DMA_WINDOW_SIZE ((ULONG)0x01000000)
+#define LANCE_DMA_WINDOW_MASK ((ULONG)0xff000000)
+
+//
+// The full value for CSR2: IADR[31:24] in bits 15:8 and IADR[23:16] in
+// bits 7:0.
+//
+#define LANCE_GET_CSR2_ADDRESS(Adr) \
+    ((USHORT)(((ULONG)(Adr) >> 16) & 0xffff))
 
 typedef struct _LANCE_INITIALIZATION_BLOCK {
 
@@ -251,9 +281,10 @@ typedef struct _LANCE_RECEIVE_ENTRY {
 #define LANCE_SET_RECEIVE_BUFFER_ADDRESS(Adptr,Rd,Adr) \
 { \
     PVOID _Adr = (Adr); \
+    PLANCE_ADAPTER _Adptr = (Adptr);\
     PLANCE_RECEIVE_ENTRY _Rd = (Rd); \
     ULONG _Offset;\
-    _Offset = NdisGetPhysicalAddressLow(MmGetPhysicalAddress(_Adr));\
+    _Offset = LANCE_GET_HARDWARE_PHYSICAL_ADDRESS(_Adptr, _Adr);\
     LANCE_WRITE_HARDWARE_LOW_PART_ADDRESS(\
         _Rd->LowReceiveBufferAddress,\
         (USHORT)((ULONG)_Offset) & 0xffff); \
@@ -383,9 +414,10 @@ typedef struct _LANCE_TRANSMIT_ENTRY {
 #define LANCE_SET_TRANSMIT_BUFFER_ADDRESS(Adptr,Td,Adr) \
 { \
     PVOID _Adr = (Adr); \
+    PLANCE_ADAPTER _Adptr = (Adptr);\
     PLANCE_TRANSMIT_ENTRY _Td = (Td); \
     ULONG _Offset;\
-    _Offset = NdisGetPhysicalAddressLow(MmGetPhysicalAddress(_Adr));\
+    _Offset = LANCE_GET_HARDWARE_PHYSICAL_ADDRESS(_Adptr, _Adr);\
     LANCE_WRITE_HARDWARE_LOW_PART_ADDRESS(\
         _Td->LowTransmitBufferAddress,\
         (USHORT)(((ULONG)_Offset) & 0xffff)\

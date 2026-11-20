@@ -315,11 +315,17 @@ Return Value:
 
                 if ((SourceData == NULL) && (SourceLength != 0))
                 {
+                    //
+                    // Mapping failed (low on system PTEs).  Give the buffer
+                    // and ring back and fail this one packet.  RESOURCES
+                    // would make NDIS hold it until a send completes, and
+                    // with nothing else in the ring none ever would.
+                    //
                     BufferDescriptor->Next = BufferListNext;
                     Adapter->LanceBufferListHeads[i] = LanceBuffersIndex;
                     Adapter->AllocateableRing = CurrentRingElement;
                     Adapter->NumberOfAvailableRings++;
-                    return NDIS_STATUS_RESOURCES;
+                    return NDIS_STATUS_FAILURE;
                 }
 
                 if (SourceLength != 0)

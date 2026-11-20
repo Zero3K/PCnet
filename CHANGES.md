@@ -1,6 +1,6 @@
 # Changes on branch `fix/win7-on-master`
 
-The starting point was the NT 4.0 DDK DEC LANCE driver as ported by Copilot: 16-bit LANCE mode (SWSTYLE 0), 24-bit DMA, PCI detection added, and EISA/ISA/TURBOchannel removed. Every fix below is its own commit, and the commit messages give the full reasoning. The design has not changed: 16-bit LANCE mode, SWSTYLE 0, 24-bit DMA through a DMA pool below 16 MB.
+The starting point was the NT 4.0 DDK DEC LANCE driver as ported by Copilot: 16-bit LANCE mode (SWSTYLE 0), 24-bit DMA, PCI detection added, and EISA/ISA/TURBOchannel removed. Every fix below is its own commit, and the commit messages give the full reasoning. The design has not changed: 16-bit LANCE mode, SWSTYLE 0, 24-bit descriptor addresses. Since the cold-boot fix below, the DMA memory sits in one 16 MB-aligned window below 4 GB instead of below 16 MB.
 
 This branch sits on top of `master` as of `c723dfb` (merge of #17), so it keeps the fixes already merged there:
 
@@ -8,6 +8,14 @@ This branch sits on top of `master` as of `c723dfb` (merge of #17), so it keeps 
 - **Interrupt causes kept for the DPC** (#17). The ISR acknowledges CSR0 and saves the causes; the DPC collects them under `NdisMSynchronizeWithInterrupt`. Fix 5 below keeps this design and closes the remaining gaps.
 
 **Windows 7 DHCP failure** ("unidentified network", 169.254.x.x address): fix 12 is the likely cause. After a packet-filter or multicast change, the driver never told NDIS to resume sending, so the DHCP request never went out. Windows 7 makes several of those changes as the interface comes up; Server 2003 does not.
+
+**Windows 7 x64 cold boot, Code 10** (#53, #55): every DMA allocation was limited to the first 16 MB of RAM. Early in a cold boot on x64 that memory is mostly in use, so the allocation failed. A disable/enable or a warm reboot happened to find room, which is why those worked. The chip doesn't need memory below 16 MB. In 16-bit mode the PCnet-PCI chips take bits 31:24 of every bus-master address (init block, rings and buffers) from CSR2[15:8] (IADR[31:24]). So the driver now:
+
+- allocates all of its DMA memory as one block of about 60 KB: init block, rings, receive buffers and transmit buffers. Before, it made 101 separate page-sized allocations, about 400 KB in all;
+- places that block anywhere below 4 GB, without crossing a 16 MB boundary;
+- writes the full upper 16 address bits to CSR2 (it used to write 0 in bits 15:8).
+
+Map registers and bounce buffers (`NdisMAllocateSharedMemory`, as #55 suggests) can't help here. The chip reads and writes the init block, rings and buffers directly, so they have to be at addresses it can reach.
 
 ## Build results
 
@@ -79,7 +87,7 @@ Each entry gives what was wrong, what changed, and how to verify it. The test nu
 
 ### Reviewed and found correct (no change)
 
-- **24-bit DMA.** The driver allocates its contiguous DMA pool with a highest acceptable address of 0x00FFFFFF, so it lies entirely below 16 MB. Every descriptor and buffer address is taken from that pool. The high byte comes from `(addr >> 16) & 0xff`, and CSR2[15:8] (the upper address byte in 16-bit mode) is written as 0.
+- **24-bit DMA.** Descriptors hold address bits 23:0, with the high byte taken from `(addr >> 16) & 0xff`. Bits 31:24 come from CSR2[15:8], which holds the top byte of the 16 MB window that contains all of the DMA memory (see the cold-boot fix above).
 - **Register offsets.** RDP 0x10, RAP 0x12, reset 0x14 and BDP 0x16 are correct for WIO mode.
 
 ## Untested
@@ -103,10 +111,9 @@ The driver still copies every transmitted packet into a bounce buffer in the sha
 
 These are out of scope or need a decision first:
 
-- **No link-state reporting.** There is no `OID_GEN_MEDIA_CONNECT_STATUS` and no `NDIS_STATUS_MEDIA_CONNECT`/`DISCONNECT` indication, so the OS always shows the cable as connected. Fixing this needs a CheckForHang handler that polls the link state (BCR4 LNKST on 79C970A and later). That is new functionality.
-- **No CheckForHang handler.** A wedged chip is never detected or reset.
-- **Not 64-bit clean.** `IoPortBase` is a `ULONG`, and there are pointer/ULONG casts. The INF is x86-only for that reason.
-- **`NdisQueryBuffer`** is used in the send and transfer paths. It maps through `MmMapLockedPages` and bugchecks if the mapping fails under low memory. `NdisQueryBufferSafe` is the NDIS 5.1 replacement.
+- **Link state is polled, not interrupt-driven.** `LanceCheckForHang` reads BCR4 about every 2 seconds and reports `NDIS_STATUS_MEDIA_CONNECT`/`DISCONNECT`, so an unplugged cable shows up within about 2 seconds. It reports a disconnect only after BCR4 has shown the link up once, so a chip or emulator without a working link bit stays "connected" as before. It skips the original 79C970.
+- **No hang detection.** `LanceCheckForHang` always returns FALSE, so a wedged chip is only reset when NDIS sees a send or request time out.
+- **64-bit.** The build is clean for `fre x64 WIN7`, and the 8-byte write into `IoPortBase` is fixed. `IoPortBase` is still a `ULONG`, which holds an x86/x64 I/O port number.
 - **Filter and multicast sets fail while a MAC-issued reset is in progress** (they return FAILURE instead of pending). This is rare, but a protocol may report the failure.
 - **NDIS-issued reset during a pending set.** The pending set is not completed, on the assumption that NDIS aborts it, as the original NT4 driver assumed. This is worth confirming on ReactOS NDIS.
 - **Interrupt DPC vs. timer.** The deferred timer callback calls the same DPC routine. This relies on NDIS serializing timer callbacks with the interrupt DPC for a serialized miniport, which NDIS does on Windows. ReactOS should be confirmed.

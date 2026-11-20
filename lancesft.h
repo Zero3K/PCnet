@@ -280,6 +280,15 @@ typedef struct _LANCE_BUFFER_DESCRIPTOR {
 //
 #define LANCE_MAX_LOOKAHEAD ( 248 - LANCE_HEADER_SIZE )
 
+//
+// What a receive indication actually carries after the header: the rest
+// of the first receive buffer (LanceProcessReceiveInterrupts indicates
+// that buffer only).  This is the true maximum lookahead, whatever
+// lookahead a protocol asks for.
+//
+#define LANCE_INDICATED_LOOKAHEAD(A) \
+    ((ULONG)((A)->SizeOfReceiveBuffer - LANCE_HEADER_SIZE))
+
 
 
 
@@ -350,6 +359,12 @@ typedef struct _LANCE_ADAPTER {
     BOOLEAN SharedMemoryAllocated;
     BOOLEAN IoPortsRegistered;
     NDIS_PHYSICAL_ADDRESS SharedMemoryPhysicalAddress;
+
+    //
+    // Physical base of the 16 MB window that holds the DMA block
+    // (LANCE_DMA_WINDOW_SIZE).  Its top byte goes into CSR2.
+    //
+    ULONG DmaWindowBase;
 
     //
     // PCI device ID, and the chip ID read from CSR88/CSR89 after reset.
@@ -585,6 +600,14 @@ typedef struct _LANCE_ADAPTER {
     BOOLEAN ResetPending;           // NdisMResetComplete owed
 
     //
+    // A filter or multicast set arrived during a driver-started reset
+    // whose INIT had already been issued with the old init block.  The
+    // IDON handler runs one more reset to load the new values before it
+    // completes the request.
+    //
+    BOOLEAN ReinitAfterReset;
+
+    //
     // During an indication this is set to the current indications context
     //
     LANCE_RECEIVE_CONTEXT IndicatingMacReceiveContext;
@@ -622,6 +645,23 @@ typedef struct _LANCE_ADAPTER {
     // removed; the hardware must not be touched after that.
     //
     BOOLEAN SurpriseRemoved;
+
+    //
+    // Set at the start of LanceHalt.  From then on no reset may start
+    // and the deferred timer may not be armed again.
+    //
+    BOOLEAN Halting;
+
+    //
+    // Link (cable) state, polled from BCR4 in LanceCheckForHang.
+    // MediaConnected is what has been reported to NDIS; it starts TRUE.
+    // A disconnect is only reported once BCR4 has shown the link up at
+    // least once (LinkStatusTrusted), so a chip or emulator that doesn't
+    // implement the link bit can't leave the adapter stuck offline.
+    //
+    BOOLEAN MediaConnected;
+    BOOLEAN LinkStatusTrusted;
+    USHORT Bcr4;
 
     //
     // Lookahead buffer for loopback packets
@@ -667,7 +707,7 @@ typedef struct _LANCE_ADAPTER {
 #define LANCE_DO_DEFERRED(Adapter) \
 { \
     PLANCE_ADAPTER _A = (Adapter); \
-    if (_A->ResetInProgress) { \
+    if (_A->ResetInProgress && !_A->Halting) { \
         NdisMSetTimer(&_A->DeferredTimer, 0);\
     } \
 }
@@ -840,6 +880,11 @@ LanceEnableInterrupt(
 VOID
 LanceHalt(
     IN PVOID MiniportAdapterContext
+    );
+
+BOOLEAN
+LanceCheckForHang(
+    IN NDIS_HANDLE MiniportAdapterContext
     );
 
 VOID

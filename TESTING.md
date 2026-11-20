@@ -99,7 +99,7 @@ Run every item on both adapter types. Write down the result and anything odd in 
 | 5 | DNS / outside | `ping www.reactos.org` (if ICMP passes the host's NAT), or open a web page | Name resolves, replies or page load |
 | 6 | Large transfer | Download a file of 100 MB or more (browser, `wget`, or SMB from the host), or copy a large file to/from a host share | Completes; the hash matches the source; no stalls longer than a few seconds |
 | 7 | Sustained load | Run test 6 while `ping -t 10.0.2.2` runs | No "Request timed out" bursts, no hang, no bugcheck |
-| 8 | Cable unplug | VM *Settings → Network → Adapter 1 → Cable Connected* off (or the network icon in the VM status bar → *Connect Network Adapter*) for 30 s, then back on | Pings fail while unplugged and resume by themselves after replug. No bugcheck, adapter stays enabled. (The driver does not report media-disconnect status; see CHANGES.md.) |
+| 8 | Cable unplug | VM *Settings → Network → Adapter 1 → Cable Connected* off (or the network icon in the VM status bar → *Connect Network Adapter*) for 30 s, then back on | Within about 2 s of unplugging, Windows shows "Network cable unplugged" (Server 2003: a red X on the tray icon). Within about 2 s of replugging, it reconnects and renews DHCP. Pings resume by themselves. No bugcheck, adapter stays enabled. If the cable status never changes, VirtualBox isn't reporting link status in BCR4; connectivity must still recover after replug. |
 | 9 | Disable / enable | Device Manager → adapter → *Disable*, then *Enable*. Repeat 5 times | Each enable reloads the driver (chip ID line again), and DHCP and ping work again. No bugcheck on disable, which exercises LanceHalt |
 | 10 | Reboot | Restart from the Start menu, 3 times | Clean shutdown (LanceShutdown stops the chip), and after the next boot tests 1–4 pass |
 | 11 | Cold boot | Fully power off, then on; repeat several times on both adapter types | Same as 10, including DHCP and ping after each cold boot |
@@ -107,7 +107,11 @@ Run every item on both adapter types. Write down the result and anything odd in 
 
 If a test fails, keep the debug output and note the test number. A `!analyze -v` (WinDbg) or `bt` (KDBG) from any bugcheck is the most useful thing to send back.
 
-For the low-memory DMA allocation change, also repeat cold boots and disable/enable cycles when low physical memory is fragmented. With a kernel debugger, verify that the initialization block and rings share one allocation, each receive and transmit buffer has its own allocation, and every allocation ends below 16 MB. If allocation failures can be injected, check failures at the descriptor allocation and at early and late receive and transmit buffer allocations; each attempt must release all prior allocations and leave the device stopped. Repeat on Windows 7 x64 when a compatible x64 driver build and package are available.
+For the DMA window change, run test 11 (cold boot) at least 5 times on Windows 7 x64 with 2 GB or more of guest RAM. That's the case that failed with Code 10. With a kernel debugger, check these:
+
+- The init block, rings, receive buffers and transmit buffers are all in one allocation of about 60 KB.
+- That allocation is below 4 GB and does not cross a 16 MB boundary. With more guest RAM its top address byte (bits 31:24) is usually not 0.
+- CSR2 reads back that byte in bits 15:8. If allocation failures can be injected, check failures at the descriptor allocation and at early and late receive and transmit buffer allocations; each attempt must release all prior allocations and leave the device stopped. Repeat on Windows 7 x64 when a compatible x64 driver build and package are available.
 
 ## 6. Not covered by the VM
 
