@@ -585,12 +585,24 @@ Return Value:
     // Register the IoPortRanges
     //
 
-    Status = NdisMRegisterIoPortRange(
-        (PVOID *)(&(Adapter->IoPortBase)),
-        MiniportAdapterHandle,
-        Adapter->IoBaseAddr,
-        0x20
-        );
+    {
+        //
+        // NdisMRegisterIoPortRange writes a PVOID.  IoPortBase is a ULONG,
+        // so on x64 passing its address let the call write 8 bytes over
+        // it and the fields after it.  On x86 and x64 the mapped value is
+        // the I/O port number itself, so the ULONG holds it.
+        //
+        PVOID MappedPortBase = NULL;
+
+        Status = NdisMRegisterIoPortRange(
+            &MappedPortBase,
+            MiniportAdapterHandle,
+            Adapter->IoBaseAddr,
+            0x20
+            );
+
+        Adapter->IoPortBase = (ULONG)(ULONG_PTR)MappedPortBase;
+    }
 
     Adapter->RAP = Adapter->IoPortBase + 0x12;
     Adapter->RDP = Adapter->IoPortBase + 0x10;
