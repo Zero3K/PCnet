@@ -111,10 +111,9 @@ The driver still copies every transmitted packet into a bounce buffer in the sha
 
 These are out of scope or need a decision first:
 
-- **No link-state reporting.** There is no `OID_GEN_MEDIA_CONNECT_STATUS` and no `NDIS_STATUS_MEDIA_CONNECT`/`DISCONNECT` indication, so the OS always shows the cable as connected. Fixing this needs a CheckForHang handler that polls the link state (BCR4 LNKST on 79C970A and later). That is new functionality.
-- **No CheckForHang handler.** A wedged chip is never detected or reset.
-- **Not 64-bit clean.** `IoPortBase` is a `ULONG`, and there are pointer/ULONG casts. The INF is x86-only for that reason.
-- **`NdisQueryBuffer`** is used in the send and transfer paths. It maps through `MmMapLockedPages` and bugchecks if the mapping fails under low memory. `NdisQueryBufferSafe` is the NDIS 5.1 replacement.
+- **Link state is polled, not interrupt-driven.** `LanceCheckForHang` reads BCR4 about every 2 seconds and reports `NDIS_STATUS_MEDIA_CONNECT`/`DISCONNECT`, so an unplugged cable shows up within about 2 seconds. It reports a disconnect only after BCR4 has shown the link up once, so a chip or emulator without a working link bit stays "connected" as before. It skips the original 79C970.
+- **No hang detection.** `LanceCheckForHang` always returns FALSE, so a wedged chip is only reset when NDIS sees a send or request time out.
+- **64-bit.** The build is clean for `fre x64 WIN7`, and the 8-byte write into `IoPortBase` is fixed. `IoPortBase` is still a `ULONG`, which holds an x86/x64 I/O port number.
 - **Filter and multicast sets fail while a MAC-issued reset is in progress** (they return FAILURE instead of pending). This is rare, but a protocol may report the failure.
 - **NDIS-issued reset during a pending set.** The pending set is not completed, on the assumption that NDIS aborts it, as the original NT4 driver assumed. This is worth confirming on ReactOS NDIS.
 - **Interrupt DPC vs. timer.** The deferred timer callback calls the same DPC routine. This relies on NDIS serializing timer callbacks with the interrupt DPC for a serialized miniport, which NDIS does on Windows. ReactOS should be confirmed.

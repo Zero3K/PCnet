@@ -653,6 +653,17 @@ typedef struct _LANCE_ADAPTER {
     BOOLEAN Halting;
 
     //
+    // Link (cable) state, polled from BCR4 in LanceCheckForHang.
+    // MediaConnected is what has been reported to NDIS; it starts TRUE.
+    // A disconnect is only reported once BCR4 has shown the link up at
+    // least once (LinkStatusTrusted), so a chip or emulator that doesn't
+    // implement the link bit can't leave the adapter stuck offline.
+    //
+    BOOLEAN MediaConnected;
+    BOOLEAN LinkStatusTrusted;
+    USHORT Bcr4;
+
+    //
     // Lookahead buffer for loopback packets
     //
     UCHAR Lookahead[LANCE_MAX_LOOKAHEAD + LANCE_HEADER_SIZE];
@@ -869,6 +880,11 @@ LanceEnableInterrupt(
 VOID
 LanceHalt(
     IN PVOID MiniportAdapterContext
+    );
+
+BOOLEAN
+LanceCheckForHang(
+    IN NDIS_HANDLE MiniportAdapterContext
     );
 
 VOID

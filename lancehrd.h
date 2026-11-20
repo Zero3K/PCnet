@@ -42,8 +42,20 @@ Notes:
 #define LANCE_SELECT_CSR4  ((USHORT)4)
 #define LANCE_SELECT_CSR88 ((USHORT)88)
 #define LANCE_SELECT_CSR89 ((USHORT)89)
+#define LANCE_SELECT_BCR4  ((USHORT)4)
 #define LANCE_SELECT_BCR18 ((USHORT)18)
 #define LANCE_SELECT_BCR20 ((USHORT)20)
+
+//
+// BCR4 (LED0 control, link status by default: 0x00C0 after reset).
+// LEDOUT shows the OR of the enabled LED sources.  With only LNKSTE
+// enabled among bits 6:0 it is the link status.  LEDPOL inverts the
+// pin, so the driver doesn't use BCR4 for link status when it's set.
+//
+#define LANCE_BCR4_LEDOUT       ((USHORT)0x8000)
+#define LANCE_BCR4_LEDPOL       ((USHORT)0x4000)
+#define LANCE_BCR4_LNKSTE       ((USHORT)0x0040)
+#define LANCE_BCR4_SOURCES_6_0  ((USHORT)0x007f)
 
 //
 // CSR4 (test and features control).  The xxxM bits mask the matching

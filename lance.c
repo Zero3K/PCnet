@@ -85,6 +85,7 @@ UINT LanceGlobalSupportedOids[] = {
     OID_GEN_VENDOR_ID,
     OID_GEN_VENDOR_DESCRIPTION,
     OID_GEN_DRIVER_VERSION,
+    OID_GEN_MEDIA_CONNECT_STATUS,
     OID_GEN_CURRENT_PACKET_FILTER,
     OID_GEN_CURRENT_LOOKAHEAD,
     OID_GEN_XMIT_OK,
@@ -351,7 +352,7 @@ Return Value:
     NdisZeroMemory(&LanceChar, sizeof(LanceChar));
     LanceChar.MajorNdisVersion = LANCE_NDIS_MAJOR_VERSION;
     LanceChar.MinorNdisVersion = LANCE_NDIS_MINOR_VERSION;
-    LanceChar.CheckForHangHandler = NULL;
+    LanceChar.CheckForHangHandler = LanceCheckForHang;
     LanceChar.DisableInterruptHandler = LanceDisableInterrupt;
     LanceChar.EnableInterruptHandler = LanceEnableInterrupt;
     LanceChar.HaltHandler = LanceHalt;
@@ -476,6 +477,7 @@ Return Value:
     LANCE_ZERO_MEMORY(Adapter, sizeof(LANCE_ADAPTER));
 
     Adapter->MaxLookAhead = LANCE_MAX_LOOKAHEAD;
+    Adapter->MediaConnected = TRUE;
 
     Adapter->MiniportAdapterHandle = MiniportAdapterHandle;
     Adapter->BeingRemoved = FALSE;
@@ -768,6 +770,125 @@ Return Value:
     NdisFreeMemory(Adapter, sizeof(LANCE_ADAPTER), 0);
 
     return;
+}
+
+
+STATIC
+BOOLEAN
+LanceSyncReadBcr4(
+    IN PVOID Context
+    )
+
+/*++
+
+Routine Description:
+
+    Reads BCR4 with the ISR locked out, then puts RAP back on CSR0,
+    where the rest of the driver expects it.
+
+--*/
+
+{
+    PLANCE_ADAPTER Adapter = (PLANCE_ADAPTER)Context;
+    USHORT Bcr4;
+
+    LANCE_ISR_WRITE_RAP(Adapter, LANCE_SELECT_BCR4);
+    NdisRawReadPortUshort(Adapter->BDP, &Bcr4);
+    LANCE_ISR_WRITE_RAP(Adapter, LANCE_SELECT_CSR0);
+
+    Adapter->Bcr4 = Bcr4;
+
+    return TRUE;
+}
+
+
+BOOLEAN
+LanceCheckForHang(
+    IN NDIS_HANDLE MiniportAdapterContext
+    )
+
+/*++
+
+Routine Description:
+
+    NDIS calls this about every 2 seconds.  The driver has no hang
+    detection of its own (NDIS already resets it when sends or requests
+    time out), so it always returns FALSE.  It uses the call to poll the
+    link status in BCR4 and tells NDIS when the cable is unplugged or
+    plugged back in.
+
+    A disconnect is only reported after BCR4 has shown the link up at
+    least once.  If a chip or emulator doesn't implement the link bit,
+    the adapter therefore stays "connected", as it always was before,
+    instead of being stuck offline.
+
+--*/
+
+{
+    PLANCE_ADAPTER Adapter =
+        PLANCE_ADAPTER_FROM_CONTEXT_HANDLE(MiniportAdapterContext);
+    USHORT Bcr4;
+    BOOLEAN LinkUp;
+
+    //
+    // The original PCnet-PCI (79C970) is left out: its BCR4 is not
+    // documented the same way.
+    //
+    if (Adapter->ResetInProgress ||
+        Adapter->HardwareFailure ||
+        Adapter->SurpriseRemoved ||
+        Adapter->Halting ||
+        (Adapter->ChipPart == PCNET_PART_79C970) ||
+        (Adapter->ChipPart == PCNET_PART_79C970_ALT))
+    {
+        return FALSE;
+    }
+
+    NdisMSynchronizeWithInterrupt(
+        &Adapter->Interrupt,
+        LanceSyncReadBcr4,
+        (PVOID)Adapter
+        );
+
+    Bcr4 = Adapter->Bcr4;
+
+    //
+    // LEDOUT is the link status only when LNKSTE is the only LED source
+    // enabled in bits 6:0 and the polarity isn't inverted (the reset
+    // default, 0x00C0).
+    //
+    if ((Bcr4 == 0xffff) ||
+        (Bcr4 & LANCE_BCR4_LEDPOL) ||
+        ((Bcr4 & LANCE_BCR4_SOURCES_6_0) != LANCE_BCR4_LNKSTE))
+    {
+        return FALSE;
+    }
+
+    LinkUp = (BOOLEAN)((Bcr4 & LANCE_BCR4_LEDOUT) != 0);
+
+    if (LinkUp)
+    {
+        Adapter->LinkStatusTrusted = TRUE;
+    }
+    else if (!Adapter->LinkStatusTrusted)
+    {
+        return FALSE;
+    }
+
+    if (LinkUp != Adapter->MediaConnected)
+    {
+        Adapter->MediaConnected = LinkUp;
+
+        NdisMIndicateStatus(
+            Adapter->MiniportAdapterHandle,
+            LinkUp ? NDIS_STATUS_MEDIA_CONNECT : NDIS_STATUS_MEDIA_DISCONNECT,
+            NULL,
+            0
+            );
+        NdisMIndicateStatusComplete(Adapter->MiniportAdapterHandle);
+    }
+
+    return FALSE;
 }
 
 
@@ -2927,6 +3048,14 @@ Return Value:
 
             MoveSource = (PVOID)(&GenericUShort);
             MoveBytes = sizeof(GenericUShort);
+            break;
+
+        case OID_GEN_MEDIA_CONNECT_STATUS:
+
+            GenericULong = (ULONG)(Adapter->MediaConnected ?
+                                   NdisMediaStateConnected :
+                                   NdisMediaStateDisconnected);
+
             break;
 
         case OID_GEN_CURRENT_LOOKAHEAD:
