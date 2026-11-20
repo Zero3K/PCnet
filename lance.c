@@ -265,6 +265,12 @@ LanceSyncStartInit(
     IN PVOID Context
     );
 
+STATIC
+BOOLEAN
+LanceSyncPollInitDone(
+    IN PVOID Context
+    );
+
 VOID
 StartAdapterReset(
     IN PLANCE_ADAPTER Adapter
@@ -1484,13 +1490,21 @@ Return Value:
 
     //
     // LanceIsr clears FirstInitialization when it sees IDON.  Initializing
-    // takes microseconds; give up after about half a second.
+    // takes microseconds, but early in a cold boot the interrupt can be
+    // late or lost, which used to fail the start with Code 10.  So also
+    // look at CSR0 ourselves every 10 ms, and give up after 2 seconds.
     //
-    for (i = 0;
-         (i < 50) && *(volatile BOOLEAN *)&Adapter->FirstInitialization;
-         i++)
+    for (i = 0; i < 200; i++)
     {
         NdisMSleep(10000);
+
+        if (NdisMSynchronizeWithInterrupt(
+                &Adapter->Interrupt,
+                LanceSyncPollInitDone,
+                (PVOID)Adapter))
+        {
+            break;
+        }
     }
 
     //
@@ -1690,6 +1704,59 @@ LanceSyncReadInterruptStatus(
                             ~LANCE_CSR0_TRANSMITTER_ON) |
                            (Csr & LANCE_CSR0_TRANSMITTER_ON));
     Status->Adapter->PendingInterruptStatus = 0;
+
+    return TRUE;
+}
+
+STATIC
+BOOLEAN
+LanceSyncPollInitDone(
+    IN PVOID Context
+    )
+
+/*++
+
+Routine Description:
+
+    Used by LanceInitialInit, with the ISR locked out, to check for IDON
+    without depending on the interrupt.  If CSR0 shows IDON before the
+    ISR has seen it, acknowledge it the same way the ISR would.
+
+Return Value:
+
+    TRUE once the first initialization is done.
+
+--*/
+
+{
+    PLANCE_ADAPTER Adapter = (PLANCE_ADAPTER)Context;
+    USHORT Csr;
+
+    if (!Adapter->FirstInitialization)
+    {
+        return TRUE;
+    }
+
+    LANCE_ISR_WRITE_RAP(Adapter, LANCE_SELECT_CSR0);
+    LANCE_ISR_READ_RDP(Adapter, &Csr);
+
+    if ((Csr == 0xffff) || !(Csr & LANCE_CSR0_INITIALIZATION_DONE))
+    {
+        return FALSE;
+    }
+
+    //
+    // IDON is write-one-to-clear; the other command bits ignore a zero.
+    //
+    LANCE_ISR_WRITE_RDP(
+        Adapter,
+        (USHORT)(LANCE_CSR0_INITIALIZATION_DONE | LANCE_CSR0_INTERRUPT_ENABLE)
+    );
+
+    Adapter->FirstInitialization = FALSE;
+
+    DbgPrint("PCnet: IDON found by polling CSR0 (0x%04x); "
+             "the init interrupt was not delivered.\n", Csr);
 
     return TRUE;
 }
