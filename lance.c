@@ -3080,15 +3080,17 @@ Return Value:
 
         case OID_GEN_VENDOR_ID:
 
-            NdisMoveMemory(
-                (PVOID)(&GenericULong),
-                Adapter->NetworkAddress,
-                3
-                );
+            //
+            // The 3-byte IEEE OUI (the first three bytes of the burned-in
+            // address), followed by one byte that identifies the NIC.
+            // This used to copy the OUI into a ULONG, then overwrite its
+            // first byte and leave the fourth uninitialized.
+            //
+            LANCE_MOVE_MEMORY(GenericArray, Adapter->NetworkAddress, 3);
+            GenericArray[3] = 0x04;
 
-            GenericULong &= 0xFFFFFF00;
-
-            GenericULong |= 0x04;
+            MoveSource = (PVOID)(GenericArray);
+            MoveBytes = 4;
             break;
 
         case OID_GEN_VENDOR_DESCRIPTION:
