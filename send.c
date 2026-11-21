@@ -124,7 +124,7 @@ Return Value:
     //
     // Length of the packet
     //
-    ULONG TotalVirtualLength;
+    UINT TotalVirtualLength;
 
     //
     // Holds the adapter buffer index available for allocation.
