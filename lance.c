@@ -4322,11 +4322,8 @@ Return Value:
 
                 Adapter->IndicatedAPacket = TRUE;
 
-                NdisCreateLookaheadBufferFromSharedMemory(
-                    (PVOID)(Adapter->ReceiveVAs[Adapter->CurrentReceiveIndex]),
-                    LookAheadSize + LANCE_HEADER_SIZE,
-                    &LookaheadBuffer
-                );
+                LookaheadBuffer =
+                    (PUCHAR)Adapter->ReceiveVAs[Adapter->CurrentReceiveIndex];
             }
 
             if (LookaheadBuffer != NULL)
@@ -4341,7 +4338,6 @@ Return Value:
                     PacketSize - LANCE_HEADER_SIZE
                 );
 
-                NdisDestroyLookaheadBufferFromSharedMemory(LookaheadBuffer);
             }
 
             ReceivePacketCount++;
