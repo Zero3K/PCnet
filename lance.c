@@ -831,11 +831,22 @@ Routine Description:
     BOOLEAN LinkUp;
 
     //
+    // A reset is running.  Sends get RESOURCES until it finishes, so
+    // no send arms the timer, and if its IDON interrupt went missing
+    // nothing else would run the DPC again.  Arm the timer so the DPC
+    // looks at CSR0 itself (LanceSyncReadInterruptStatus).
+    //
+    if (Adapter->ResetInProgress)
+    {
+        LANCE_DO_DEFERRED(Adapter);
+        return FALSE;
+    }
+
+    //
     // The original PCnet-PCI (79C970) is left out: its BCR4 is not
     // documented the same way.
     //
-    if (Adapter->ResetInProgress ||
-        Adapter->HardwareFailure ||
+    if (Adapter->HardwareFailure ||
         Adapter->SurpriseRemoved ||
         Adapter->Halting ||
         (Adapter->ChipPart == PCNET_PART_79C970) ||
@@ -1849,14 +1860,34 @@ LanceSyncReadInterruptStatus(
     )
 {
     PLANCE_INTERRUPT_STATUS Status = (PLANCE_INTERRUPT_STATUS)Context;
+    PLANCE_ADAPTER Adapter = Status->Adapter;
     USHORT Csr;
 
-    LANCE_ISR_WRITE_RAP(Status->Adapter, LANCE_SELECT_CSR0);
-    LANCE_ISR_READ_RDP(Status->Adapter, &Csr);
-    Status->Csr = (USHORT)((Status->Adapter->PendingInterruptStatus &
+    LANCE_ISR_WRITE_RAP(Adapter, LANCE_SELECT_CSR0);
+    LANCE_ISR_READ_RDP(Adapter, &Csr);
+    Status->Csr = (USHORT)((Adapter->PendingInterruptStatus &
                             ~LANCE_CSR0_TRANSMITTER_ON) |
                            (Csr & LANCE_CSR0_TRANSMITTER_ON));
-    Status->Adapter->PendingInterruptStatus = 0;
+    Adapter->PendingInterruptStatus = 0;
+
+    //
+    // While a reset's INIT is running, don't depend on the IDON
+    // interrupt alone: if it is late or lost, nothing else would ever
+    // finish the reset (the first init polls for the same reason, see
+    // LanceSyncPollInitDone).  If CSR0 already shows IDON, acknowledge
+    // it the way the ISR would and pass it on.
+    //
+    if (Adapter->ResetInitStarted &&
+        (Csr != 0xffff) &&
+        (Csr & LANCE_CSR0_INITIALIZATION_DONE))
+    {
+        LANCE_ISR_WRITE_RDP(
+            Adapter,
+            (USHORT)(LANCE_CSR0_INITIALIZATION_DONE | LANCE_CSR0_INTERRUPT_ENABLE)
+        );
+
+        Status->Csr |= LANCE_CSR0_INITIALIZATION_DONE;
+    }
 
     return TRUE;
 }
