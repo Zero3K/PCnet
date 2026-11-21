@@ -1973,6 +1973,20 @@ LanceSyncReadInterruptStatus(
 STATIC
 BOOLEAN
 NTAPI
+LanceSyncQueueReceiveInterrupt(
+    IN PVOID Context
+    )
+{
+    PLANCE_ADAPTER Adapter = (PLANCE_ADAPTER)Context;
+
+    Adapter->PendingInterruptStatus |= LANCE_CSR0_RECEIVER_INTERRUPT;
+    return TRUE;
+}
+
+
+STATIC
+BOOLEAN
+NTAPI
 LanceSyncPollInitDone(
     IN PVOID Context
     )
@@ -2121,6 +2135,12 @@ Return Value:
         return;
     }
 
+    NdisMSynchronizeWithInterrupt(
+        &Adapter->Interrupt,
+        LanceSyncQueueReceiveInterrupt,
+        Adapter
+    );
+
     LanceHandleInterrupt(Context);
 }
 
@@ -2157,6 +2177,7 @@ Return Value:
     //
     USHORT Csr = 0;
     LANCE_INTERRUPT_STATUS InterruptStatus;
+    BOOLEAN DeferReceiveProcessing = FALSE;
 
     LOG(IN_DPC);
 
@@ -2365,17 +2386,27 @@ Return Value:
 
         //
         // Check the interrupt vector and see if there are any
-        // more receives to process.  After we process any
-        // other interrupt source we always come back to the top
-        // of the loop to check if any more receive packets have
-        // come in.  This is to lessen the probability that we
-        // drop a receive.
+        // more receives to process.  After processing another interrupt
+        // source, come back to the top of the loop to check for receives
+        // that arrived in the meantime, unless the receive batch limit
+        // requires us to yield to the deferred timer.
         //
         if (Csr & LANCE_CSR0_RECEIVER_INTERRUPT)
         {
             if (ProcessReceiveInterrupts(Adapter))
             {
                 Csr &= ~LANCE_CSR0_RECEIVER_INTERRUPT;
+            }
+            else
+            {
+                //
+                // Yield after one receive batch.  The interrupt was
+                // already acknowledged, so the timer will queue receive
+                // work again for the next DPC pass.
+                //
+                Csr &= ~LANCE_CSR0_RECEIVER_INTERRUPT;
+                NdisMSetTimer(&Adapter->DeferredTimer, 1);
+                DeferReceiveProcessing = TRUE;
             }
         }
 
@@ -2436,6 +2467,10 @@ Return Value:
 
 LoopBottom:;
 
+        if (DeferReceiveProcessing)
+        {
+            break;
+        }
     }
 
     //
@@ -5194,6 +5229,3 @@ Return Value:
 
     return(FALSE);
 }
-
-
-
