@@ -354,7 +354,6 @@ Return Value:
     NDIS_STATUS Status;
     NDIS_HANDLE NdisWrapperHandle;
     NDIS_MINIPORT_CHARACTERISTICS LanceChar;
-    NDIS_STRING MacName = RTL_CONSTANT_STRING(L"Lance");
     UNICODE_STRING RoutineName;
 
     //
@@ -1086,7 +1085,7 @@ LanceQueryPciResources(
     )
 {
     PNDIS_RESOURCE_LIST ResourceList = NULL;
-    ULONG ResourceListSize = 0;
+    UINT ResourceListSize = 0;
     ULONG AllocatedResourceListSize;
     ULONG DescriptorOffset;
     ULONG i;
@@ -3606,13 +3605,6 @@ Return Value:
 
 {
 
-    //
-    // Keeps track of the *MAC's* status.  The status will only be
-    // reset if the filter change action routine is called.
-    //
-    NDIS_STATUS StatusOfFilterChange = NDIS_STATUS_SUCCESS;
-
-
 #if LANCE_TRACE
     DbgPrint("In LanceSetPacketFilter\n");
 #endif
@@ -4062,7 +4054,7 @@ Return Value:
 
                CRCValue = CalculateCRC(
                               6,
-                              Adapter->MulticastAddresses[NumberOfAddresses-1]
+                              (PCHAR)Adapter->MulticastAddresses[NumberOfAddresses-1]
                           );
 
                HashValue |= ((CRCValue & 0x00000001)?(0x00000020):(0x00000000));
@@ -4168,7 +4160,7 @@ Return Value:
     //
     // Pointer to host addressable space for the lookahead buffer
     //
-    PUCHAR LookaheadBuffer;
+    PCHAR LookaheadBuffer;
 
     ULONG ReceivePacketCount = 0;
 
@@ -4323,7 +4315,7 @@ Return Value:
                 Adapter->IndicatedAPacket = TRUE;
 
                 LookaheadBuffer =
-                    (PUCHAR)Adapter->ReceiveVAs[Adapter->CurrentReceiveIndex];
+                    (PCHAR)Adapter->ReceiveVAs[Adapter->CurrentReceiveIndex];
             }
 
             if (LookaheadBuffer != NULL)
@@ -5197,4 +5189,3 @@ Return Value:
 
 
 
-
