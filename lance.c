@@ -609,8 +609,16 @@ Return Value:
         ConfigHandle
     );
 
+    //
+    // Use the NetworkAddress override only if it is a unicast address.
+    // A group address (which includes all-ones) as the station address
+    // would make peers drop our ARP replies, and all-ones would make the
+    // chip treat broadcasts as addressed to it.  An all-zero override is
+    // replaced with the address PROM's later, like no override at all.
+    //
     if ((Status == NDIS_STATUS_SUCCESS) &&
-        (Length == LANCE_LENGTH_OF_ADDRESS))
+        (Length == LANCE_LENGTH_OF_ADDRESS) &&
+        !(((PUCHAR)NetAddress)[0] & 0x01))
     {
         NdisMoveMemory(
             Adapter->CurrentNetworkAddress,
