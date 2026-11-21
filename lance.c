@@ -121,6 +121,22 @@ typedef struct _LANCE_INTERRUPT_STATUS {
     USHORT Csr;
 } LANCE_INTERRUPT_STATUS, *PLANCE_INTERRUPT_STATUS;
 
+//
+// KeFlushQueuedDpcs exists only from Windows XP SP2 and Server 2003.
+// Importing it would stop the driver loading at all on XP RTM and SP1,
+// so DriverEntry looks it up and LanceFlushQueuedDpcs falls back to a
+// short sleep where it is missing.
+//
+typedef VOID (*LANCE_FLUSH_QUEUED_DPCS)(VOID);
+
+static LANCE_FLUSH_QUEUED_DPCS LanceKeFlushQueuedDpcs = NULL;
+
+STATIC
+VOID
+LanceFlushQueuedDpcs(
+    VOID
+    );
+
 STATIC
 BOOLEAN
 LanceSyncReadInterruptStatus(
@@ -334,6 +350,15 @@ Return Value:
     NDIS_HANDLE NdisWrapperHandle;
     NDIS_MINIPORT_CHARACTERISTICS LanceChar;
     NDIS_STRING MacName = NDIS_STRING_CONST("Lance");
+    UNICODE_STRING RoutineName;
+
+    //
+    // Optional kernel routine, see LanceFlushQueuedDpcs.  Cast through
+    // ULONG_PTR: a data-to-function pointer cast is a warning.
+    //
+    RtlInitUnicodeString(&RoutineName, L"KeFlushQueuedDpcs");
+    LanceKeFlushQueuedDpcs = (LANCE_FLUSH_QUEUED_DPCS)(ULONG_PTR)
+        MmGetSystemRoutineAddress(&RoutineName);
 
     //
     // Initialize the wrapper.
@@ -712,7 +737,7 @@ Return Value:
     KeMemoryBarrier();
 
     NdisMCancelTimer(&Adapter->DeferredTimer, &TimerCancelled);
-    KeFlushQueuedDpcs();
+    LanceFlushQueuedDpcs();
 
     //
     // 1. Stop the chip, synchronized with the ISR so the RAP write cannot
@@ -740,7 +765,7 @@ Return Value:
     //    already queued can run after the memory is freed.
     //
     NdisMCancelTimer(&Adapter->DeferredTimer, &TimerCancelled);
-    KeFlushQueuedDpcs();
+    LanceFlushQueuedDpcs();
 
     //
     // 4. With the chip stopped and nothing left to call back into us,
@@ -770,6 +795,36 @@ Return Value:
     NdisFreeMemory(Adapter, sizeof(LANCE_ADAPTER), 0);
 
     return;
+}
+
+
+STATIC
+VOID
+LanceFlushQueuedDpcs(
+    VOID
+    )
+
+/*++
+
+Routine Description:
+
+    Waits for DPCs (including timer callbacks) that are already queued
+    or running to finish.  PASSIVE_LEVEL only.
+
+    Without KeFlushQueuedDpcs (Windows XP before SP2) there is no exact
+    equivalent, so it gives a DPC running on another CPU time to finish.
+
+--*/
+
+{
+    if (LanceKeFlushQueuedDpcs != NULL)
+    {
+        LanceKeFlushQueuedDpcs();
+    }
+    else
+    {
+        NdisMSleep(20000);
+    }
 }
 
 
@@ -1584,11 +1639,11 @@ Return Value:
                 NdisMCancelTimer(&Adapter->DeferredTimer, &TimerCancelled);
                 if (!TimerCancelled)
                 {
-                    KeFlushQueuedDpcs();
+                    LanceFlushQueuedDpcs();
                     NdisMCancelTimer(&Adapter->DeferredTimer, &TimerCancelled);
                     if (!TimerCancelled)
                     {
-                        KeFlushQueuedDpcs();
+                        LanceFlushQueuedDpcs();
                     }
                 }
             }
