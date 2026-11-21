@@ -121,6 +121,22 @@ typedef struct _LANCE_INTERRUPT_STATUS {
     USHORT Csr;
 } LANCE_INTERRUPT_STATUS, *PLANCE_INTERRUPT_STATUS;
 
+//
+// KeFlushQueuedDpcs exists only from Windows XP SP2 and Server 2003.
+// Importing it would stop the driver loading at all on XP RTM and SP1,
+// so DriverEntry looks it up and LanceFlushQueuedDpcs falls back to a
+// short sleep where it is missing.
+//
+typedef VOID (*LANCE_FLUSH_QUEUED_DPCS)(VOID);
+
+static LANCE_FLUSH_QUEUED_DPCS LanceKeFlushQueuedDpcs = NULL;
+
+STATIC
+VOID
+LanceFlushQueuedDpcs(
+    VOID
+    );
+
 STATIC
 BOOLEAN
 LanceSyncReadInterruptStatus(
@@ -334,6 +350,15 @@ Return Value:
     NDIS_HANDLE NdisWrapperHandle;
     NDIS_MINIPORT_CHARACTERISTICS LanceChar;
     NDIS_STRING MacName = NDIS_STRING_CONST("Lance");
+    UNICODE_STRING RoutineName;
+
+    //
+    // Optional kernel routine, see LanceFlushQueuedDpcs.  Cast through
+    // ULONG_PTR: a data-to-function pointer cast is a warning.
+    //
+    RtlInitUnicodeString(&RoutineName, L"KeFlushQueuedDpcs");
+    LanceKeFlushQueuedDpcs = (LANCE_FLUSH_QUEUED_DPCS)(ULONG_PTR)
+        MmGetSystemRoutineAddress(&RoutineName);
 
     //
     // Initialize the wrapper.
@@ -584,8 +609,16 @@ Return Value:
         ConfigHandle
     );
 
+    //
+    // Use the NetworkAddress override only if it is a unicast address.
+    // A group address (which includes all-ones) as the station address
+    // would make peers drop our ARP replies, and all-ones would make the
+    // chip treat broadcasts as addressed to it.  An all-zero override is
+    // replaced with the address PROM's later, like no override at all.
+    //
     if ((Status == NDIS_STATUS_SUCCESS) &&
-        (Length == LANCE_LENGTH_OF_ADDRESS))
+        (Length == LANCE_LENGTH_OF_ADDRESS) &&
+        !(((PUCHAR)NetAddress)[0] & 0x01))
     {
         NdisMoveMemory(
             Adapter->CurrentNetworkAddress,
@@ -712,7 +745,7 @@ Return Value:
     KeMemoryBarrier();
 
     NdisMCancelTimer(&Adapter->DeferredTimer, &TimerCancelled);
-    KeFlushQueuedDpcs();
+    LanceFlushQueuedDpcs();
 
     //
     // 1. Stop the chip, synchronized with the ISR so the RAP write cannot
@@ -740,7 +773,7 @@ Return Value:
     //    already queued can run after the memory is freed.
     //
     NdisMCancelTimer(&Adapter->DeferredTimer, &TimerCancelled);
-    KeFlushQueuedDpcs();
+    LanceFlushQueuedDpcs();
 
     //
     // 4. With the chip stopped and nothing left to call back into us,
@@ -770,6 +803,36 @@ Return Value:
     NdisFreeMemory(Adapter, sizeof(LANCE_ADAPTER), 0);
 
     return;
+}
+
+
+STATIC
+VOID
+LanceFlushQueuedDpcs(
+    VOID
+    )
+
+/*++
+
+Routine Description:
+
+    Waits for DPCs (including timer callbacks) that are already queued
+    or running to finish.  PASSIVE_LEVEL only.
+
+    Without KeFlushQueuedDpcs (Windows XP before SP2) there is no exact
+    equivalent, so it gives a DPC running on another CPU time to finish.
+
+--*/
+
+{
+    if (LanceKeFlushQueuedDpcs != NULL)
+    {
+        LanceKeFlushQueuedDpcs();
+    }
+    else
+    {
+        NdisMSleep(20000);
+    }
 }
 
 
@@ -831,11 +894,22 @@ Routine Description:
     BOOLEAN LinkUp;
 
     //
+    // A reset is running.  Sends get RESOURCES until it finishes, so
+    // no send arms the timer, and if its IDON interrupt went missing
+    // nothing else would run the DPC again.  Arm the timer so the DPC
+    // looks at CSR0 itself (LanceSyncReadInterruptStatus).
+    //
+    if (Adapter->ResetInProgress)
+    {
+        LANCE_DO_DEFERRED(Adapter);
+        return FALSE;
+    }
+
+    //
     // The original PCnet-PCI (79C970) is left out: its BCR4 is not
     // documented the same way.
     //
-    if (Adapter->ResetInProgress ||
-        Adapter->HardwareFailure ||
+    if (Adapter->HardwareFailure ||
         Adapter->SurpriseRemoved ||
         Adapter->Halting ||
         (Adapter->ChipPart == PCNET_PART_79C970) ||
@@ -1573,11 +1647,11 @@ Return Value:
                 NdisMCancelTimer(&Adapter->DeferredTimer, &TimerCancelled);
                 if (!TimerCancelled)
                 {
-                    KeFlushQueuedDpcs();
+                    LanceFlushQueuedDpcs();
                     NdisMCancelTimer(&Adapter->DeferredTimer, &TimerCancelled);
                     if (!TimerCancelled)
                     {
-                        KeFlushQueuedDpcs();
+                        LanceFlushQueuedDpcs();
                     }
                 }
             }
@@ -1849,14 +1923,34 @@ LanceSyncReadInterruptStatus(
     )
 {
     PLANCE_INTERRUPT_STATUS Status = (PLANCE_INTERRUPT_STATUS)Context;
+    PLANCE_ADAPTER Adapter = Status->Adapter;
     USHORT Csr;
 
-    LANCE_ISR_WRITE_RAP(Status->Adapter, LANCE_SELECT_CSR0);
-    LANCE_ISR_READ_RDP(Status->Adapter, &Csr);
-    Status->Csr = (USHORT)((Status->Adapter->PendingInterruptStatus &
+    LANCE_ISR_WRITE_RAP(Adapter, LANCE_SELECT_CSR0);
+    LANCE_ISR_READ_RDP(Adapter, &Csr);
+    Status->Csr = (USHORT)((Adapter->PendingInterruptStatus &
                             ~LANCE_CSR0_TRANSMITTER_ON) |
                            (Csr & LANCE_CSR0_TRANSMITTER_ON));
-    Status->Adapter->PendingInterruptStatus = 0;
+    Adapter->PendingInterruptStatus = 0;
+
+    //
+    // While a reset's INIT is running, don't depend on the IDON
+    // interrupt alone: if it is late or lost, nothing else would ever
+    // finish the reset (the first init polls for the same reason, see
+    // LanceSyncPollInitDone).  If CSR0 already shows IDON, acknowledge
+    // it the way the ISR would and pass it on.
+    //
+    if (Adapter->ResetInitStarted &&
+        (Csr != 0xffff) &&
+        (Csr & LANCE_CSR0_INITIALIZATION_DONE))
+    {
+        LANCE_ISR_WRITE_RDP(
+            Adapter,
+            (USHORT)(LANCE_CSR0_INITIALIZATION_DONE | LANCE_CSR0_INTERRUPT_ENABLE)
+        );
+
+        Status->Csr |= LANCE_CSR0_INITIALIZATION_DONE;
+    }
 
     return TRUE;
 }
@@ -1996,6 +2090,18 @@ Return Value:
 --*/
 
 {
+    PLANCE_ADAPTER Adapter = (PLANCE_ADAPTER)Context;
+
+    //
+    // Nothing is armed after LanceHalt starts, but a callback that NDIS
+    // queued before then can still arrive.  Don't let it synchronize
+    // with an interrupt that LanceHalt may already have deregistered.
+    //
+    if (Adapter->Halting)
+    {
+        return;
+    }
+
     LanceHandleInterrupt(Context);
 }
 
@@ -2056,13 +2162,18 @@ Return Value:
         // for processing.  If there are no reasons to
         // process then exit this loop.
         //
+        // A reset that has not started is not a reason once LanceHalt
+        // has begun: the reset will never start, so the loop would
+        // never end.  SetupForReset refuses new resets after Halting is
+        // set, but one can slip in just before it on another CPU.
+        //
         if (((!Adapter->ResetInitStarted) &&
              ((Csr & (LANCE_CSR0_MEMORY_ERROR |
                   LANCE_CSR0_MISSED_PACKET |
                   LANCE_CSR0_BABBLE |
                   LANCE_CSR0_RECEIVER_INTERRUPT |
                   LANCE_CSR0_TRANSMITTER_INTERRUPT)) ||
-              (Adapter->ResetInProgress))) ||
+              (Adapter->ResetInProgress && !Adapter->Halting))) ||
             (Csr & LANCE_CSR0_INITIALIZATION_DONE)
         )
         {
@@ -2273,6 +2384,14 @@ Return Value:
                 //
                 if (!Adapter->ResetInProgress)
                 {
+                    //
+                    // Sends use one descriptor per frame, so BUFF can't
+                    // happen and the transmitter only stops like this on
+                    // an underflow.  The reset discards that frame
+                    // before its descriptor is processed, so count it here.
+                    //
+                    Adapter->UnderFlow++;
+
                     SetupForReset(
                         Adapter,
                         NdisRequestGeneric4 // means MAC issued
@@ -2908,6 +3027,9 @@ Return Value:
     MoveSource = (PVOID)(&GenericULong);
     MoveBytes = sizeof(GenericULong);
 
+    *BytesWritten = 0;
+    *BytesNeeded = 0;
+
     //
     // Switch on request type
     //
@@ -3024,15 +3146,17 @@ Return Value:
 
         case OID_GEN_VENDOR_ID:
 
-            NdisMoveMemory(
-                (PVOID)(&GenericULong),
-                Adapter->NetworkAddress,
-                3
-                );
+            //
+            // The 3-byte IEEE OUI (the first three bytes of the burned-in
+            // address), followed by one byte that identifies the NIC.
+            // This used to copy the OUI into a ULONG, then overwrite its
+            // first byte and leave the fourth uninitialized.
+            //
+            LANCE_MOVE_MEMORY(GenericArray, Adapter->NetworkAddress, 3);
+            GenericArray[3] = 0x04;
 
-            GenericULong &= 0xFFFFFF00;
-
-            GenericULong |= 0x04;
+            MoveSource = (PVOID)(GenericArray);
+            MoveBytes = 4;
             break;
 
         case OID_GEN_VENDOR_DESCRIPTION:
@@ -3100,7 +3224,11 @@ Return Value:
 
         case OID_GEN_XMIT_OK:
 
-            GenericULong = (ULONG)(Adapter->Transmit + Adapter->LateCollision);
+            //
+            // Late-collision frames take the success path and are
+            // already counted in Transmit.
+            //
+            GenericULong = (ULONG)(Adapter->Transmit);
 
             break;
 
@@ -3112,19 +3240,24 @@ Return Value:
 
         case OID_GEN_XMIT_ERROR:
 
-            GenericULong = (ULONG)(Adapter->LostCarrier);
+            GenericULong = (ULONG)(Adapter->RetryFailure +
+                                   Adapter->LostCarrier +
+                                   Adapter->UnderFlow);
 
             break;
 
         case OID_GEN_RCV_ERROR:
 
-            GenericULong = (ULONG)(Adapter->CRCError);
+            GenericULong = (ULONG)(Adapter->CRCError +
+                                   Adapter->FramingError +
+                                   Adapter->LengthError);
 
             break;
 
         case OID_GEN_RCV_NO_BUFFER:
 
-            GenericULong = (ULONG)(Adapter->OutOfReceiveBuffers);
+            GenericULong = (ULONG)(Adapter->OutOfReceiveBuffers +
+                                   Adapter->MissedPacket);
 
             break;
 
@@ -3172,7 +3305,7 @@ Return Value:
 
             LANCE_MOVE_MEMORY(InfoBuffer, MoveSource, MoveBytes);
 
-            (*BytesWritten) += MoveBytes;
+            *BytesWritten = MoveBytes;
 
         }
     }
@@ -3314,7 +3447,7 @@ Return Value:
                 Status = NDIS_STATUS_INVALID_LENGTH;
 
                 *BytesRead = 0;
-                *BytesNeeded = 0;
+                *BytesNeeded = 4;
 
                 break;
 
@@ -3397,7 +3530,11 @@ Return Value:
             break;
     }
 
-    if (Status == NDIS_STATUS_SUCCESS){
+    //
+    // A filter or multicast set that pends has already read its buffer;
+    // NDIS reports BytesRead when the request completes.
+    //
+    if ((Status == NDIS_STATUS_SUCCESS) || (Status == NDIS_STATUS_PENDING)){
 
         *BytesRead = OidLength;
         *BytesNeeded = 0;
@@ -4065,6 +4202,14 @@ Return Value:
 
                 Adapter->OutOfReceiveBuffers++;
             }
+            else if (ReceiveSummaryBits & LANCE_RECEIVE_FRAMING_ERROR)
+            {
+                //
+                // The chip sets FRAM only together with CRC, so test it
+                // first or alignment errors are all counted as CRC errors.
+                //
+                Adapter->FramingError++;
+            }
             else if (ReceiveSummaryBits & LANCE_RECEIVE_CRC_ERROR)
             {
                 Adapter->CRCError++;
@@ -4072,10 +4217,6 @@ Return Value:
             else if (ReceiveSummaryBits & LANCE_RECEIVE_OVERFLOW_ERROR)
             {
                 Adapter->OutOfReceiveBuffers++;
-            }
-            else if (ReceiveSummaryBits & LANCE_RECEIVE_FRAMING_ERROR)
-            {
-                Adapter->FramingError++;
             }
 
             ReceivePacketCount++;
@@ -4133,7 +4274,7 @@ Return Value:
             if ((PacketSize < LANCE_HEADER_SIZE) ||
                 (PacketSize > LANCE_LARGE_BUFFER_SIZE))
             {
-                Adapter->FramingError++;
+                Adapter->LengthError++;
 
                 LookaheadBuffer = NULL;
             }
@@ -4582,12 +4723,15 @@ Return Value:
                 {
                     //
                     // Collect some statistics on how many tries were needed.
+                    // A frame can both defer and collide, so DEF is
+                    // counted on its own.
                     //
                     if (TransmitSummaryBits & LANCE_TRANSMIT_DEFERRED)
                     {
                         Adapter->Deferred++;
                     }
-                    else if (TransmitSummaryBits & LANCE_TRANSMIT_ONE_RETRY)
+
+                    if (TransmitSummaryBits & LANCE_TRANSMIT_ONE_RETRY)
                     {
                         Adapter->OneRetry++;
                     }
@@ -4918,6 +5062,18 @@ Return Value:
 #endif
 
     LOG(RESET_STEP_1);
+
+    //
+    // Once LanceHalt has started, no reset may begin: the DPC would
+    // never start it (it checks Halting) and would loop on
+    // ResetInProgress while LanceHalt waits for it in
+    // NdisMDeregisterInterrupt.  A transmit-stopped or memory error
+    // seen by a DPC that overlaps LanceHalt on another CPU lands here.
+    //
+    if (Adapter->Halting)
+    {
+        return;
+    }
 
     //
     // Shut down the chip.  We won't be doing any more work until

@@ -554,6 +554,7 @@ typedef struct _LANCE_ADAPTER {
     UINT OutOfReceiveBuffers;
     UINT CRCError;
     UINT FramingError;
+    UINT LengthError;       // frames dropped for an impossible length
     UINT RetryFailure;
     UINT LostCarrier;
     UINT LateCollision;
