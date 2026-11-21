@@ -2321,6 +2321,14 @@ Return Value:
                 //
                 if (!Adapter->ResetInProgress)
                 {
+                    //
+                    // Sends use one descriptor per frame, so BUFF can't
+                    // happen and the transmitter only stops like this on
+                    // an underflow.  The reset discards that frame
+                    // before its descriptor is processed, so count it here.
+                    //
+                    Adapter->UnderFlow++;
+
                     SetupForReset(
                         Adapter,
                         NdisRequestGeneric4 // means MAC issued
@@ -3148,7 +3156,11 @@ Return Value:
 
         case OID_GEN_XMIT_OK:
 
-            GenericULong = (ULONG)(Adapter->Transmit + Adapter->LateCollision);
+            //
+            // Late-collision frames take the success path and are
+            // already counted in Transmit.
+            //
+            GenericULong = (ULONG)(Adapter->Transmit);
 
             break;
 
@@ -3160,19 +3172,24 @@ Return Value:
 
         case OID_GEN_XMIT_ERROR:
 
-            GenericULong = (ULONG)(Adapter->LostCarrier);
+            GenericULong = (ULONG)(Adapter->RetryFailure +
+                                   Adapter->LostCarrier +
+                                   Adapter->UnderFlow);
 
             break;
 
         case OID_GEN_RCV_ERROR:
 
-            GenericULong = (ULONG)(Adapter->CRCError);
+            GenericULong = (ULONG)(Adapter->CRCError +
+                                   Adapter->FramingError +
+                                   Adapter->LengthError);
 
             break;
 
         case OID_GEN_RCV_NO_BUFFER:
 
-            GenericULong = (ULONG)(Adapter->OutOfReceiveBuffers);
+            GenericULong = (ULONG)(Adapter->OutOfReceiveBuffers +
+                                   Adapter->MissedPacket);
 
             break;
 
@@ -4113,6 +4130,14 @@ Return Value:
 
                 Adapter->OutOfReceiveBuffers++;
             }
+            else if (ReceiveSummaryBits & LANCE_RECEIVE_FRAMING_ERROR)
+            {
+                //
+                // The chip sets FRAM only together with CRC, so test it
+                // first or alignment errors are all counted as CRC errors.
+                //
+                Adapter->FramingError++;
+            }
             else if (ReceiveSummaryBits & LANCE_RECEIVE_CRC_ERROR)
             {
                 Adapter->CRCError++;
@@ -4120,10 +4145,6 @@ Return Value:
             else if (ReceiveSummaryBits & LANCE_RECEIVE_OVERFLOW_ERROR)
             {
                 Adapter->OutOfReceiveBuffers++;
-            }
-            else if (ReceiveSummaryBits & LANCE_RECEIVE_FRAMING_ERROR)
-            {
-                Adapter->FramingError++;
             }
 
             ReceivePacketCount++;
@@ -4181,7 +4202,7 @@ Return Value:
             if ((PacketSize < LANCE_HEADER_SIZE) ||
                 (PacketSize > LANCE_LARGE_BUFFER_SIZE))
             {
-                Adapter->FramingError++;
+                Adapter->LengthError++;
 
                 LookaheadBuffer = NULL;
             }
@@ -4630,12 +4651,15 @@ Return Value:
                 {
                     //
                     // Collect some statistics on how many tries were needed.
+                    // A frame can both defer and collide, so DEF is
+                    // counted on its own.
                     //
                     if (TransmitSummaryBits & LANCE_TRANSMIT_DEFERRED)
                     {
                         Adapter->Deferred++;
                     }
-                    else if (TransmitSummaryBits & LANCE_TRANSMIT_ONE_RETRY)
+
+                    if (TransmitSummaryBits & LANCE_TRANSMIT_ONE_RETRY)
                     {
                         Adapter->OneRetry++;
                     }
