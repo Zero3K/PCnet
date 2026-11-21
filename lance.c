@@ -1996,6 +1996,18 @@ Return Value:
 --*/
 
 {
+    PLANCE_ADAPTER Adapter = (PLANCE_ADAPTER)Context;
+
+    //
+    // Nothing is armed after LanceHalt starts, but a callback that NDIS
+    // queued before then can still arrive.  Don't let it synchronize
+    // with an interrupt that LanceHalt may already have deregistered.
+    //
+    if (Adapter->Halting)
+    {
+        return;
+    }
+
     LanceHandleInterrupt(Context);
 }
 
@@ -2056,13 +2068,18 @@ Return Value:
         // for processing.  If there are no reasons to
         // process then exit this loop.
         //
+        // A reset that has not started is not a reason once LanceHalt
+        // has begun: the reset will never start, so the loop would
+        // never end.  SetupForReset refuses new resets after Halting is
+        // set, but one can slip in just before it on another CPU.
+        //
         if (((!Adapter->ResetInitStarted) &&
              ((Csr & (LANCE_CSR0_MEMORY_ERROR |
                   LANCE_CSR0_MISSED_PACKET |
                   LANCE_CSR0_BABBLE |
                   LANCE_CSR0_RECEIVER_INTERRUPT |
                   LANCE_CSR0_TRANSMITTER_INTERRUPT)) ||
-              (Adapter->ResetInProgress))) ||
+              (Adapter->ResetInProgress && !Adapter->Halting))) ||
             (Csr & LANCE_CSR0_INITIALIZATION_DONE)
         )
         {
@@ -4918,6 +4935,18 @@ Return Value:
 #endif
 
     LOG(RESET_STEP_1);
+
+    //
+    // Once LanceHalt has started, no reset may begin: the DPC would
+    // never start it (it checks Halting) and would loop on
+    // ResetInProgress while LanceHalt waits for it in
+    // NdisMDeregisterInterrupt.  A transmit-stopped or memory error
+    // seen by a DPC that overlaps LanceHalt on another CPU lands here.
+    //
+    if (Adapter->Halting)
+    {
+        return;
+    }
 
     //
     // Shut down the chip.  We won't be doing any more work until
