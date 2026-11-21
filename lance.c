@@ -139,6 +139,7 @@ LanceFlushQueuedDpcs(
 
 STATIC
 BOOLEAN
+NTAPI
 LanceSyncReadInterruptStatus(
     IN PVOID Context
     );
@@ -282,12 +283,14 @@ SetInitBlockAndInit(
 
 STATIC
 BOOLEAN
+NTAPI
 LanceSyncStartInit(
     IN PVOID Context
     );
 
 STATIC
 BOOLEAN
+NTAPI
 LanceSyncPollInitDone(
     IN PVOID Context
     );
@@ -844,6 +847,7 @@ Routine Description:
 
 STATIC
 BOOLEAN
+NTAPI
 LanceSyncReadBcr4(
     IN PVOID Context
     )
@@ -1928,6 +1932,7 @@ Return Value:
 
 STATIC
 BOOLEAN
+NTAPI
 LanceSyncReadInterruptStatus(
     IN PVOID Context
     )
@@ -1967,6 +1972,7 @@ LanceSyncReadInterruptStatus(
 
 STATIC
 BOOLEAN
+NTAPI
 LanceSyncPollInitDone(
     IN PVOID Context
     )
@@ -4956,6 +4962,7 @@ Return Value:
 
 STATIC
 BOOLEAN
+NTAPI
 LanceSyncStartInit(
     IN PVOID Context
     )
@@ -5141,6 +5148,7 @@ Return Value:
 
 STATIC
 BOOLEAN
+NTAPI
 LanceSyncStopChip(
     IN PVOID Context
     )

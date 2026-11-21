@@ -798,6 +798,7 @@ typedef enum _LANCE_PROC_ID {
 }
 
 BOOLEAN
+NTAPI
 LanceSyncStopChip(
     IN PVOID Context
     );
