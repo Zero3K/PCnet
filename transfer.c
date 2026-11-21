@@ -31,6 +31,7 @@ Revision History:
 
 extern
 NDIS_STATUS
+NTAPI
 LanceTransferData(
     OUT PNDIS_PACKET Packet,
     OUT PUINT BytesTransferred,

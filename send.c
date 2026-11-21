@@ -75,6 +75,7 @@ Revision History:
 
 extern
 NDIS_STATUS
+NTAPI
 LanceSend(
     IN NDIS_HANDLE MiniportAdapterContext,
     IN PNDIS_PACKET Packet,
@@ -123,7 +124,7 @@ Return Value:
     //
     // Length of the packet
     //
-    ULONG TotalVirtualLength;
+    UINT TotalVirtualLength;
 
     //
     // Holds the adapter buffer index available for allocation.

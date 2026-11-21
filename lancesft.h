@@ -812,6 +812,7 @@ LanceSyncStopChip(
 
 
 NDIS_STATUS
+NTAPI
 LanceTransferData(
     OUT PNDIS_PACKET Packet,
     OUT PUINT BytesTransferred,
@@ -822,6 +823,7 @@ LanceTransferData(
     );
 
 NDIS_STATUS
+NTAPI
 LanceSend(
     IN NDIS_HANDLE MiniportAdapterContext,
     IN PNDIS_PACKET Packet,
@@ -869,31 +871,37 @@ SetupAllocate(
     );
 
 VOID
+NTAPI
 LanceDisableInterrupt(
     IN NDIS_HANDLE MiniportAdapterContext
     );
 
 VOID
+NTAPI
 LanceEnableInterrupt(
     IN NDIS_HANDLE MiniportAdapterContext
     );
 
 VOID
+NTAPI
 LanceHalt(
     IN PVOID MiniportAdapterContext
     );
 
 BOOLEAN
+NTAPI
 LanceCheckForHang(
     IN NDIS_HANDLE MiniportAdapterContext
     );
 
 VOID
+NTAPI
 LanceShutdown(
     IN PVOID ShutdownContext
     );
 
 VOID
+NTAPI
 LancePnPEventNotify(
     IN NDIS_HANDLE MiniportAdapterContext,
     IN NDIS_DEVICE_PNP_EVENT PnPEvent,
@@ -902,11 +910,13 @@ LancePnPEventNotify(
     );
 
 VOID
+NTAPI
 LanceHandleInterrupt(
     IN NDIS_HANDLE Context
     );
 
 VOID
+NTAPI
 LanceIsr(
     OUT PBOOLEAN InterruptRecognized,
     OUT PBOOLEAN QueueDpc,
@@ -914,6 +924,7 @@ LanceIsr(
     );
 
 NDIS_STATUS
+NTAPI
 LanceInitialize(
     OUT PNDIS_STATUS OpenErrorStatus,
     OUT PUINT SelectedMediumIndex,

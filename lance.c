@@ -144,6 +144,7 @@ LanceSyncReadInterruptStatus(
     );
 
 VOID
+NTAPI
 LanceDeferredTimerRoutine(
     IN PVOID SystemSpecific1,
     IN NDIS_HANDLE Context,
@@ -152,6 +153,7 @@ LanceDeferredTimerRoutine(
     );
 
 NDIS_STATUS
+NTAPI
 LanceQueryInformation(
     IN NDIS_HANDLE MiniportAdapterContext,
     IN NDIS_OID Oid,
@@ -162,6 +164,7 @@ LanceQueryInformation(
     );
 
 NDIS_STATUS
+NTAPI
 LanceSetInformation(
     IN NDIS_HANDLE MiniportAdapterContext,
     IN NDIS_OID Oid,
@@ -172,6 +175,7 @@ LanceSetInformation(
     );
 
 NDIS_STATUS
+NTAPI
 LanceReset(
     OUT PBOOLEAN AddressingReset,
     IN NDIS_HANDLE MiniportAdapterContext
@@ -318,6 +322,7 @@ DRIVER_INITIALIZE DriverEntry;
 
 
 NTSTATUS
+NTAPI
 DriverEntry(
     IN PDRIVER_OBJECT DriverObject,
     IN PUNICODE_STRING RegistryPath
@@ -349,7 +354,6 @@ Return Value:
     NDIS_STATUS Status;
     NDIS_HANDLE NdisWrapperHandle;
     NDIS_MINIPORT_CHARACTERISTICS LanceChar;
-    NDIS_STRING MacName = NDIS_STRING_CONST("Lance");
     UNICODE_STRING RoutineName;
 
     //
@@ -416,6 +420,7 @@ Return Value:
 
 extern
 NDIS_STATUS
+NTAPI
 LanceInitialize(
     OUT PNDIS_STATUS OpenErrorStatus,
     OUT PUINT SelectedMediumIndex,
@@ -703,6 +708,7 @@ Fail1:
 
 
 VOID
+NTAPI
 LanceHalt(
     IN PVOID MiniportAdapterContext
     )
@@ -866,6 +872,7 @@ Routine Description:
 
 
 BOOLEAN
+NTAPI
 LanceCheckForHang(
     IN NDIS_HANDLE MiniportAdapterContext
     )
@@ -967,6 +974,7 @@ Routine Description:
 
 
 VOID
+NTAPI
 LanceShutdown(
     IN PVOID ShutdownContext
     )
@@ -996,6 +1004,7 @@ Routine Description:
 
 
 VOID
+NTAPI
 LancePnPEventNotify(
     IN NDIS_HANDLE MiniportAdapterContext,
     IN NDIS_DEVICE_PNP_EVENT PnPEvent,
@@ -1076,7 +1085,7 @@ LanceQueryPciResources(
     )
 {
     PNDIS_RESOURCE_LIST ResourceList = NULL;
-    ULONG ResourceListSize = 0;
+    UINT ResourceListSize = 0;
     ULONG AllocatedResourceListSize;
     ULONG DescriptorOffset;
     ULONG i;
@@ -1808,6 +1817,7 @@ Return Value:
 
 extern
 VOID
+NTAPI
 LanceIsr(
     OUT PBOOLEAN InterruptRecognized,
     OUT PBOOLEAN QueueDpc,
@@ -2010,6 +2020,7 @@ Return Value:
 
 STATIC
 VOID
+NTAPI
 LanceDisableInterrupt(
     IN NDIS_HANDLE MiniportAdapterContext
     )
@@ -2040,6 +2051,7 @@ Return Value:
 
 STATIC
 VOID
+NTAPI
 LanceEnableInterrupt(
     IN NDIS_HANDLE MiniportAdapterContext
     )
@@ -2066,6 +2078,7 @@ Return Value:
     LANCE_WRITE_RDP(Adapter, LANCE_CSR0_INTERRUPT_ENABLE);
 }
 VOID
+NTAPI
 LanceDeferredTimerRoutine(
     IN PVOID SystemSpecific1,
     IN NDIS_HANDLE Context,
@@ -2106,6 +2119,7 @@ Return Value:
 }
 
 VOID
+NTAPI
 LanceHandleInterrupt(
     IN NDIS_HANDLE Context
     )
@@ -2950,8 +2964,9 @@ Return Value:
 
 
 NDIS_STATUS
+NTAPI
 LanceQueryInformation(
-    IN PNDIS_HANDLE MiniportAdapterContext,
+    IN NDIS_HANDLE MiniportAdapterContext,
     IN NDIS_OID Oid,
     IN PVOID InfoBuffer,
     IN ULONG BytesLeft,
@@ -3320,6 +3335,7 @@ Return Value:
 }
 
 NDIS_STATUS
+NTAPI
 LanceSetInformation(
     IN NDIS_HANDLE MiniportAdapterContext,
     IN NDIS_OID Oid,
@@ -3589,13 +3605,6 @@ Return Value:
 
 {
 
-    //
-    // Keeps track of the *MAC's* status.  The status will only be
-    // reset if the filter change action routine is called.
-    //
-    NDIS_STATUS StatusOfFilterChange = NDIS_STATUS_SUCCESS;
-
-
 #if LANCE_TRACE
     DbgPrint("In LanceSetPacketFilter\n");
 #endif
@@ -3778,6 +3787,7 @@ Return Value:
 }
 
 NDIS_STATUS
+NTAPI
 LanceReset(
     OUT PBOOLEAN AddressingReset,
     IN NDIS_HANDLE MiniportAdapterContext
@@ -4044,7 +4054,7 @@ Return Value:
 
                CRCValue = CalculateCRC(
                               6,
-                              Adapter->MulticastAddresses[NumberOfAddresses-1]
+                              (PCHAR)Adapter->MulticastAddresses[NumberOfAddresses-1]
                           );
 
                HashValue |= ((CRCValue & 0x00000001)?(0x00000020):(0x00000000));
@@ -4150,7 +4160,7 @@ Return Value:
     //
     // Pointer to host addressable space for the lookahead buffer
     //
-    PUCHAR LookaheadBuffer;
+    PCHAR LookaheadBuffer;
 
     ULONG ReceivePacketCount = 0;
 
@@ -4304,11 +4314,8 @@ Return Value:
 
                 Adapter->IndicatedAPacket = TRUE;
 
-                NdisCreateLookaheadBufferFromSharedMemory(
-                    (PVOID)(Adapter->ReceiveVAs[Adapter->CurrentReceiveIndex]),
-                    LookAheadSize + LANCE_HEADER_SIZE,
-                    &LookaheadBuffer
-                );
+                LookaheadBuffer =
+                    (PCHAR)Adapter->ReceiveVAs[Adapter->CurrentReceiveIndex];
             }
 
             if (LookaheadBuffer != NULL)
@@ -4323,7 +4330,6 @@ Return Value:
                     PacketSize - LANCE_HEADER_SIZE
                 );
 
-                NdisDestroyLookaheadBufferFromSharedMemory(LookaheadBuffer);
             }
 
             ReceivePacketCount++;
@@ -5183,4 +5189,3 @@ Return Value:
 
 
 
-
