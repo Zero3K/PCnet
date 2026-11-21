@@ -75,6 +75,7 @@ Revision History:
 
 extern
 NDIS_STATUS
+NTAPI
 LanceSend(
     IN NDIS_HANDLE MiniportAdapterContext,
     IN PNDIS_PACKET Packet,

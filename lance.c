@@ -144,6 +144,7 @@ LanceSyncReadInterruptStatus(
     );
 
 VOID
+NTAPI
 LanceDeferredTimerRoutine(
     IN PVOID SystemSpecific1,
     IN NDIS_HANDLE Context,
@@ -152,6 +153,7 @@ LanceDeferredTimerRoutine(
     );
 
 NDIS_STATUS
+NTAPI
 LanceQueryInformation(
     IN NDIS_HANDLE MiniportAdapterContext,
     IN NDIS_OID Oid,
@@ -162,6 +164,7 @@ LanceQueryInformation(
     );
 
 NDIS_STATUS
+NTAPI
 LanceSetInformation(
     IN NDIS_HANDLE MiniportAdapterContext,
     IN NDIS_OID Oid,
@@ -172,6 +175,7 @@ LanceSetInformation(
     );
 
 NDIS_STATUS
+NTAPI
 LanceReset(
     OUT PBOOLEAN AddressingReset,
     IN NDIS_HANDLE MiniportAdapterContext
@@ -318,6 +322,7 @@ DRIVER_INITIALIZE DriverEntry;
 
 
 NTSTATUS
+NTAPI
 DriverEntry(
     IN PDRIVER_OBJECT DriverObject,
     IN PUNICODE_STRING RegistryPath
@@ -349,7 +354,7 @@ Return Value:
     NDIS_STATUS Status;
     NDIS_HANDLE NdisWrapperHandle;
     NDIS_MINIPORT_CHARACTERISTICS LanceChar;
-    NDIS_STRING MacName = NDIS_STRING_CONST("Lance");
+    NDIS_STRING MacName = RTL_CONSTANT_STRING(L"Lance");
     UNICODE_STRING RoutineName;
 
     //
@@ -416,6 +421,7 @@ Return Value:
 
 extern
 NDIS_STATUS
+NTAPI
 LanceInitialize(
     OUT PNDIS_STATUS OpenErrorStatus,
     OUT PUINT SelectedMediumIndex,
@@ -703,6 +709,7 @@ Fail1:
 
 
 VOID
+NTAPI
 LanceHalt(
     IN PVOID MiniportAdapterContext
     )
@@ -866,6 +873,7 @@ Routine Description:
 
 
 BOOLEAN
+NTAPI
 LanceCheckForHang(
     IN NDIS_HANDLE MiniportAdapterContext
     )
@@ -967,6 +975,7 @@ Routine Description:
 
 
 VOID
+NTAPI
 LanceShutdown(
     IN PVOID ShutdownContext
     )
@@ -996,6 +1005,7 @@ Routine Description:
 
 
 VOID
+NTAPI
 LancePnPEventNotify(
     IN NDIS_HANDLE MiniportAdapterContext,
     IN NDIS_DEVICE_PNP_EVENT PnPEvent,
@@ -1808,6 +1818,7 @@ Return Value:
 
 extern
 VOID
+NTAPI
 LanceIsr(
     OUT PBOOLEAN InterruptRecognized,
     OUT PBOOLEAN QueueDpc,
@@ -2010,6 +2021,7 @@ Return Value:
 
 STATIC
 VOID
+NTAPI
 LanceDisableInterrupt(
     IN NDIS_HANDLE MiniportAdapterContext
     )
@@ -2040,6 +2052,7 @@ Return Value:
 
 STATIC
 VOID
+NTAPI
 LanceEnableInterrupt(
     IN NDIS_HANDLE MiniportAdapterContext
     )
@@ -2066,6 +2079,7 @@ Return Value:
     LANCE_WRITE_RDP(Adapter, LANCE_CSR0_INTERRUPT_ENABLE);
 }
 VOID
+NTAPI
 LanceDeferredTimerRoutine(
     IN PVOID SystemSpecific1,
     IN NDIS_HANDLE Context,
@@ -2106,6 +2120,7 @@ Return Value:
 }
 
 VOID
+NTAPI
 LanceHandleInterrupt(
     IN NDIS_HANDLE Context
     )
@@ -2950,8 +2965,9 @@ Return Value:
 
 
 NDIS_STATUS
+NTAPI
 LanceQueryInformation(
-    IN PNDIS_HANDLE MiniportAdapterContext,
+    IN NDIS_HANDLE MiniportAdapterContext,
     IN NDIS_OID Oid,
     IN PVOID InfoBuffer,
     IN ULONG BytesLeft,
@@ -3320,6 +3336,7 @@ Return Value:
 }
 
 NDIS_STATUS
+NTAPI
 LanceSetInformation(
     IN NDIS_HANDLE MiniportAdapterContext,
     IN NDIS_OID Oid,
@@ -3778,6 +3795,7 @@ Return Value:
 }
 
 NDIS_STATUS
+NTAPI
 LanceReset(
     OUT PBOOLEAN AddressingReset,
     IN NDIS_HANDLE MiniportAdapterContext
