@@ -17,6 +17,15 @@ This branch sits on top of `master` as of `c723dfb` (merge of #17), so it keeps 
 
 Map registers and bounce buffers (`NdisMAllocateSharedMemory`, as #55 suggests) can't help here. The chip reads and writes the init block, rings and buffers directly, so they have to be at addresses it can reach.
 
+**Audit follow-ups** (after #60), one commit each, with the details in the commit messages:
+
+- A reset set up while `LanceHalt` ran on another CPU made the DPC loop forever, hanging the disable.
+- A reset started by the driver itself (memory error, transmitter stopped, filter or multicast change) never finished if its IDON interrupt was lost. The DPC now also checks CSR0 for IDON, and `LanceCheckForHang` runs the DPC every 2 seconds while a reset is running.
+- The transmit and receive statistics OIDs reported the wrong counters, and `OID_GEN_VENDOR_ID` returned an uninitialized byte.
+- `BytesWritten`, `BytesRead` and `BytesNeeded` were not always filled in.
+- The driver failed to load on Windows XP before SP2 because it imported `KeFlushQueuedDpcs`. It now looks it up at run time.
+- A `NetworkAddress` override with the group bit set was used as the station address. It is now ignored.
+
 ## Build results
 
 Built with WDK 7.1.0 (7600.16385.1), using `setenv.bat … fre x86 WNET` and then `build -cZ`.
@@ -38,11 +47,11 @@ Each entry gives what was wrong, what changed, and how to verify it. The test nu
 
 1. **.gitignore was inactive** (`fa41507`). The file was named `gitignore.txt`, so build output could be committed. It is now `.gitignore` and ignores `obj*`, the build logs and `dist/`. *Verify:* `git status` after a build is clean.
 
-2. **Binary name mismatch** (`56ff762`). `TARGETNAME` built `lance.sys`, while the INF expected a different file and service name. The binary is now `lancepci.sys` and the service is `LANCEPCI`, consistently across `sources`, `lance.rc` (internal and original filename, version 1.0.0.0) and the INF. *Verify:* Driver Details shows `lancepci.sys`, and `sc query lancepci` works (tests 1–2).
+2. **Binary name mismatch** (`56ff762`). `TARGETNAME` built `lance.sys`, while the INF expected a different file and service name. The names now match across `sources`, `lance.rc` (internal and original filename, version 1.0.0.0) and the INF. They were `lancepci.sys` and `LANCEPCI` at the time; the binary is now `pcntn5m.sys` and the service `PCNTN5M`. *Verify:* Driver Details shows `pcntn5m.sys`, and `sc query pcntn5m` works (tests 1–2).
 
-3. **PCI matching too broad, chip unknown** (`5fe44e4`). The driver now accepts only `1022:2000` and `1022:2001`. After reset it reads CSR88/89 and stores the chip ID, part number and name in the adapter. It prints one `lancepci: <chip>, chip ID …` line at load. *Verify:* that line appears with the expected chip on both VM adapter types.
+3. **PCI matching too broad, chip unknown** (`5fe44e4`). The driver now accepts only `1022:2000` and `1022:2001`. After reset it reads CSR88/89 and stores the chip ID, part number and name in the adapter. It prints one `pcntn5m: <chip>, chip ID …` line at load. *Verify:* that line appears with the expected chip on both VM adapter types.
 
-4. **INF was not a clean NT x86 INF** (`d11fec1`). The INF was rewritten as `lancepci.inf`, with an `NTx86`-decorated models section listing only the two PCI IDs, and with `Characteristics 0x4`, `BusType 5` and `ndis5`/`ethernet` bindings. It has a single `AddService` and netevent.dll event-log registration. There is no amd64 section, because the driver is not 64-bit clean (`IoPortBase` is a `ULONG`, and there are pointer↔ULONG casts). *Verify:* Have Disk install on ReactOS and Server 2003 (TESTING.md, section 3).
+4. **INF was not a clean NT x86 INF** (`d11fec1`). The INF was rewritten (then as `lancepci.inf`, now `pcntn5m.inf`), with an `NTx86`-decorated models section listing only the two PCI IDs, and with `Characteristics 0x4`, `BusType 5` and `ndis5`/`ethernet` bindings. It has a single `AddService` and netevent.dll event-log registration. An `NTamd64` models section was added later, once the driver built clean for x64. *Verify:* Have Disk install on ReactOS and Server 2003 (TESTING.md, section 3).
 
 ### Runtime correctness
 
@@ -50,7 +59,7 @@ Each entry gives what was wrong, what changed, and how to verify it. The test nu
    - saves RAP, selects CSR0, and restores RAP before returning;
    - returns "not mine" when CSR0.INTR is clear or the device reads all ones.
 
-   The CSR1/CSR2/INIT sequence runs under `NdisMSynchronizeWithInterrupt`. The first initialization waits for IDON (up to 500 ms) instead of a blind 500 ms stall. *Verify:* tests 2–7.
+   The CSR1/CSR2/INIT sequence runs under `NdisMSynchronizeWithInterrupt`. The first initialization waits for IDON instead of a blind 500 ms stall. Since the cold-boot fix it waits up to 2 seconds and also polls CSR0 every 10 ms, in case the interrupt is late or lost. *Verify:* tests 2–7.
 
 6. **CSR4 unmasked interrupts the driver never clears, and BCR18 was overwritten** (`d37763f`). Writing `CSR4 = 0x4000` cleared the TXSTRT, JAB, MFCO and RCVCCO masks. TXSTRT then latched on the first transmit and held INTR, causing an interrupt storm on a level-triggered line. The driver now writes `0x4115` (DMAPLUS plus the reset-default masks). `BCR18 = 0x0060` wiped ROMTMG, LINBC and the other fields; BCR18 is now read-modify-written to set BREADE|BWRITE on the 79C970A and later only. Both writes happen once, after reset. *Verify:* test 7 with no CPU spike; in the debugger, CSR4 reads 0x4115 (or with status bits set above it).
 
@@ -79,7 +88,7 @@ Each entry gives what was wrong, what changed, and how to verify it. The test nu
 
 13. **Bad packets blocked the send queue** (`4ed4555`). Zero-length or >1514-byte sends returned RESOURCES, which NDIS retries forever. They now return FAILURE. *Verify:* code review.
 
-14. **Multicast table overflow** (`cbf91f4`). The table holds 32 entries, but `MaxMulticastList` could be up to 255 and the OID handler did not check the count. Anything over 32 overwrote the adapter structure. The registry value is now clamped to 32, and longer lists fail with `NDIS_STATUS_MULTICAST_FULL`. *Verify:* code review. Setting `MaxMulticastList = 100` in the registry should make `OID_802_3_MAXIMUM_LIST_SIZE` report 32.
+14. **Multicast table overflow** (`cbf91f4`). The table holds 32 entries, but `MaxMulticastList` could be up to 255 and the OID handler did not check the count. Anything over 32 overwrote the adapter structure. The registry value is now clamped to 32, and longer lists fail with `NDIS_STATUS_MULTICAST_FULL`. *Verify:* code review. Setting `MaximumMulticastList = 100` in the registry should make `OID_802_3_MAXIMUM_LIST_SIZE` report 32.
 
 15. **Wrong LCOL bit** (`13a1838`). The TMD3 late-collision mask was 0x0100 (a TDR bit). It is now 0x1000. *Verify:* code review against the TMD3 layout in the datasheet.
 
@@ -92,14 +101,13 @@ Each entry gives what was wrong, what changed, and how to verify it. The test nu
 
 ## Untested
 
-- **Everything except build.** No change on this branch has been run yet. TESTING.md is the plan. (Master itself has been reported working on Server 2003 and getting no DHCP address on Windows 7.)
+- **Everything except build.** These changes are only reviewed and built. TESTING.md is the plan. The cold-boot changes (#60) and the audit follow-ups have not been run yet.
 - **Am79C970, 79C971 (PCnet-FAST), 79C972 (PCnet-FAST+), 79C975 and 79C978 (PCnet-Home).** VirtualBox emulates only the 79C970A and 79C973, so these need real cards. The 79C971/972/975 should behave like the 79C973 in 16-bit mode. The 79C978 is matched on `1022:2001`, but its HomePNA PHY selection is not handled. The original 79C970 is identified by part 0x2420/0x2430, but the 0x2430 mapping is from memory and should be checked against a real chip.
-- **Windows Server 2003 x86, Windows XP x86, Windows 7 x86.** These are supported targets, since all three load NDIS 5.1 miniports. TESTING.md section 7 has an XP and Windows 7 run of the same checklist. None of them has been run yet.
+- **Windows Server 2003 x86, Windows XP x86, Windows 7 x86 and x64.** These are supported targets, since all of them load NDIS 5.1 miniports. TESTING.md section 7 has an XP and Windows 7 run of the same checklist.
 - **SMP.** The ISR/RAP synchronization is written for SMP but has only been reviewed.
 
 ## Out of scope
 
-- **Windows 7 x64.** The code is not 64-bit clean. On top of that, x64 Windows only loads kernel drivers signed by a trusted certificate.
 - **Windows 8, 10 and 11.** These versions no longer load NDIS 5.x miniports. Supporting them means a separate driver: an NDIS 6 miniport, built for x64, and attestation-signed through Microsoft's Hardware Dev Center. That would be a new driver, not a fix to this one.
 - **ReactOS upstreaming.** A ReactOS PR is most likely blocked by the license. This code comes from the NT 4.0 DDK sample, and ReactOS needs GPL-compatible code. ReactOS's FastFAT came from Microsoft's MS-PL GitHub samples, which have a different license from this code. ReactOS also already has its own `pcnet` driver.
 
@@ -112,9 +120,10 @@ The driver still copies every transmitted packet into a bounce buffer in the sha
 These are out of scope or need a decision first:
 
 - **Link state is polled, not interrupt-driven.** `LanceCheckForHang` reads BCR4 about every 2 seconds and reports `NDIS_STATUS_MEDIA_CONNECT`/`DISCONNECT`, so an unplugged cable shows up within about 2 seconds. It reports a disconnect only after BCR4 has shown the link up once, so a chip or emulator without a working link bit stays "connected" as before. It skips the original 79C970.
-- **No hang detection.** `LanceCheckForHang` always returns FALSE, so a wedged chip is only reset when NDIS sees a send or request time out.
-- **64-bit.** The build is clean for `fre x64 WIN7`, and the 8-byte write into `IoPortBase` is fixed. `IoPortBase` is still a `ULONG`, which holds an x86/x64 I/O port number.
-- **Filter and multicast sets fail while a MAC-issued reset is in progress** (they return FAILURE instead of pending). This is rare, but a protocol may report the failure.
+- **No hang detection.** `LanceCheckForHang` always returns FALSE, so a wedged chip is only reset when NDIS sees a send or request time out. While a reset is running it does run the DPC, so a reset whose IDON interrupt was lost still finishes.
+- **64-bit.** The build is clean for `fre x64 WIN7`, and the 8-byte write into `IoPortBase` is fixed. `IoPortBase` is still a `ULONG`, which holds an x86/x64 I/O port number. x64 Windows only loads drivers that are signed (or test-signed with test signing on).
+- **Filter and multicast changes drop queued sends.** Each change stops and reinitializes the chip, which discards frames still waiting on the transmit ring, although NDIS was already told they were sent. Protocols retry, but at interface startup this can cost a DHCP or ARP retry of a few seconds. Fixing it means waiting for the transmit ring to drain before stopping the chip.
+- **Windows XP before SP2.** `KeFlushQueuedDpcs` doesn't exist there, so `LanceHalt` waits 20 ms instead, which is not a guarantee on a multi-processor system.
 - **NDIS-issued reset during a pending set.** The pending set is not completed, on the assumption that NDIS aborts it, as the original NT4 driver assumed. This is worth confirming on ReactOS NDIS.
 - **Interrupt DPC vs. timer.** The deferred timer callback calls the same DPC routine. This relies on NDIS serializing timer callbacks with the interrupt DPC for a serialized miniport, which NDIS does on Windows. ReactOS should be confirmed.
 - **The driver is unsigned.** Server 2003, XP and Windows 7 x86 all warn at install, but all three allow it.

@@ -1,8 +1,8 @@
 # Testing pcntn5m.sys
 
-How to test the driver in a ReactOS x86 VM under VirtualBox. Then repeat the same steps on the other supported targets: Windows Server 2003 x86, Windows XP x86 and Windows 7 x86 (see section 7). Only the install dialogs and the debugger boot switch differ.
+How to test the driver in a ReactOS x86 VM under VirtualBox. Then repeat the same steps on the other supported targets: Windows Server 2003 x86, Windows XP x86, Windows 7 x86 and Windows 7 x64 (see section 7). Only the install dialogs, the driver signing and the debugger boot switch differ.
 
-Windows 7 x64, Windows 8, Windows 10 and Windows 11 are not supported; CHANGES.md explains why.
+Windows 8, Windows 10 and Windows 11 are not supported; CHANGES.md explains why.
 
 Test both emulated chips, one after the other:
 
@@ -111,15 +111,15 @@ For the DMA window change, run test 11 (cold boot) at least 5 times on Windows 7
 
 - The init block, rings, receive buffers and transmit buffers are all in one allocation of about 60 KB.
 - That allocation is below 4 GB and does not cross a 16 MB boundary. With more guest RAM its top address byte (bits 31:24) is usually not 0.
-- CSR2 reads back that byte in bits 15:8. If allocation failures can be injected, check failures at the descriptor allocation and at early and late receive and transmit buffer allocations; each attempt must release all prior allocations and leave the device stopped. Repeat on Windows 7 x64 when a compatible x64 driver build and package are available.
+- CSR2 reads back that byte in bits 15:8. If the allocation failure can be injected, check that init fails cleanly: the DMA allocation is logged as a resource conflict and the device is left stopped.
 
 ## 6. Not covered by the VM
 
 VirtualBox only emulates the 79C970A and 79C973. The 79C970, 79C971 (PCnet-FAST), 79C972 (PCnet-FAST+), 79C975 and 79C978 need real cards. CHANGES.md lists what is untested.
 
-## 7. Windows XP x86 and Windows 7 x86 runs
+## 7. Windows XP x86 and Windows 7 x86 and x64 runs
 
-Run the full checklist in section 5 on each OS, with both adapter types (PCnet-FAST III, then PCnet-PCI II). Use a 32-bit install; the driver will not load on x64. Differences from the ReactOS run:
+Run the full checklist in section 5 on each OS, with both adapter types (PCnet-FAST III, then PCnet-PCI II). Use the binary that matches the install: `objfre_wnet_x86\i386\pcntn5m.sys` for 32-bit, `objfre_win7_amd64\amd64\pcntn5m.sys` (built with `fre x64 WIN7`) for Windows 7 x64. Differences from the ReactOS run:
 
 - **In-box driver.** XP and Windows 7 ship AMD's PCnet driver and install it automatically for `PCI\VEN_1022&DEV_2000`. Replace it with Have Disk as in section 3:
   - On XP, the dialogs are the same as on Server 2003.
@@ -127,6 +127,7 @@ Run the full checklist in section 5 on each OS, with both adapter types (PCnet-F
 - **Unsigned driver.**
   - XP shows a "has not passed Windows Logo testing" warning: choose *Continue Anyway*.
   - Windows 7 x86 shows "Windows can't verify the publisher": choose *Install this driver software anyway*. 32-bit Windows 7 does not enforce kernel-mode signing, so no test-signing mode is needed.
+  - Windows 7 x64 enforces kernel-mode signing. Sign the driver with a test certificate and turn on test signing (`bcdedit /set testsigning on`, then reboot), or choose *Disable Driver Signature Enforcement* from the F8 boot menu on every boot.
 - **Confirm the driver.** Driver Details must show `pcntn5m.sys`, and `sc query pcntn5m` must report RUNNING. On Windows 7, also run `driverquery /v | findstr /i pcntn5m`.
 - **Debugger.**
   - On XP, add `/DEBUG /DEBUGPORT=COM1 /BAUDRATE=115200` to `boot.ini`, as on Server 2003.
@@ -134,5 +135,5 @@ Run the full checklist in section 5 on each OS, with both adapter types (PCnet-F
   - Connect WinDbg with the same pipe command as in section 4.
   - On both, enable DbgPrint output with `ed nt!Kd_DEFAULT_Mask 0xf`. On Windows 7 you can instead set the registry value `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Debug Print Filter`, `DEFAULT` = `0xf`.
 - **Windows 7 extras.**
-  - Check that the *Network and Sharing Center* shows the connection. Since the driver does not report media state, it will never show "Network cable unplugged" (see CHANGES.md).
+  - Check that the *Network and Sharing Center* shows the connection, and that test 8 makes it show "Network cable unplugged" and then reconnect.
   - Run test 9 (disable/enable) from the Network Connections folder as well as from Device Manager.
