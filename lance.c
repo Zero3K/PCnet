@@ -2964,6 +2964,9 @@ Return Value:
     MoveSource = (PVOID)(&GenericULong);
     MoveBytes = sizeof(GenericULong);
 
+    *BytesWritten = 0;
+    *BytesNeeded = 0;
+
     //
     // Switch on request type
     //
@@ -3239,7 +3242,7 @@ Return Value:
 
             LANCE_MOVE_MEMORY(InfoBuffer, MoveSource, MoveBytes);
 
-            (*BytesWritten) += MoveBytes;
+            *BytesWritten = MoveBytes;
 
         }
     }
@@ -3381,7 +3384,7 @@ Return Value:
                 Status = NDIS_STATUS_INVALID_LENGTH;
 
                 *BytesRead = 0;
-                *BytesNeeded = 0;
+                *BytesNeeded = 4;
 
                 break;
 
@@ -3464,7 +3467,11 @@ Return Value:
             break;
     }
 
-    if (Status == NDIS_STATUS_SUCCESS){
+    //
+    // A filter or multicast set that pends has already read its buffer;
+    // NDIS reports BytesRead when the request completes.
+    //
+    if ((Status == NDIS_STATUS_SUCCESS) || (Status == NDIS_STATUS_PENDING)){
 
         *BytesRead = OidLength;
         *BytesNeeded = 0;
