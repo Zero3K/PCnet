@@ -2456,6 +2456,22 @@ LoopBottom:;
         if (DeferReceiveProcessing &&
             !(Csr & LANCE_CSR0_TRANSMITTER_INTERRUPT))
         {
+            //
+            // A receive interrupt that came in while we finished the sends
+            // was taken out of PendingInterruptStatus by the read at the
+            // top of the loop.  Put it back so the DPC the ISR queued for
+            // it handles the new frames, instead of leaving them until the
+            // timer fires a clock tick later.
+            //
+            if (Csr & LANCE_CSR0_RECEIVER_INTERRUPT)
+            {
+                NdisMSynchronizeWithInterrupt(
+                    &Adapter->Interrupt,
+                    LanceSyncQueueReceiveInterrupt,
+                    Adapter
+                );
+            }
+
             break;
         }
     }
