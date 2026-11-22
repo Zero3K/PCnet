@@ -1601,9 +1601,37 @@ Return Value:
             );
 
         //
-        // Initialize the interrupt.
+        // Initialize while the interrupt is not connected.  This avoids
+        // synchronizing the first INIT against an interrupt object that
+        // has only just been registered.
         //
+        Status = LanceInitialInit(Adapter);
+        if (Status != NDIS_STATUS_SUCCESS)
+        {
+            NdisWriteErrorLogEntry(
+                Adapter->MiniportAdapterHandle,
+                NDIS_ERROR_CODE_HARDWARE_FAILURE,
+                0
+                );
 
+            //
+            // INIT may still be running; stop the chip before freeing any
+            // memory it could access.  No ISR is registered yet.
+            //
+            LanceSyncStopChip(Adapter);
+
+            MmFreeContiguousMemory(Adapter->MmMappedBaseAddr);
+            Adapter->SharedMemoryAllocated = FALSE;
+
+            DeleteAdapterMemory(Adapter);
+
+            return Status;
+        }
+
+        //
+        // Connect the interrupt only after INIT has completed.  The chip
+        // is still stopped, so it cannot use the rings until started below.
+        //
         Status = NdisMRegisterInterrupt(
                      &Adapter->Interrupt,
                      Adapter->MiniportAdapterHandle,
@@ -1614,7 +1642,8 @@ Return Value:
                      NdisInterruptLevelSensitive
                      );
 
-        if (Status != NDIS_STATUS_SUCCESS){
+        if (Status != NDIS_STATUS_SUCCESS)
+        {
 
             NdisWriteErrorLogEntry(
                 Adapter->MiniportAdapterHandle,
@@ -1630,51 +1659,7 @@ Return Value:
             return Status;
         }
 
-        if ((Status = LanceInitialInit(Adapter)) != NDIS_STATUS_SUCCESS) {
-
-
-            NdisWriteErrorLogEntry(
-                Adapter->MiniportAdapterHandle,
-                NDIS_ERROR_CODE_HARDWARE_FAILURE,
-                0
-                );
-
-            //
-            // The chip may still be running the INIT we gave it, with the
-            // init block and rings in shared memory.  Stop it, then take
-            // the interrupt away, and only then free the memory it could
-            // be DMAing to.
-            //
-
-            NdisMSynchronizeWithInterrupt(
-                &Adapter->Interrupt,
-                LanceSyncStopChip,
-                (PVOID)Adapter
-                );
-
-            NdisMDeregisterInterrupt(&Adapter->Interrupt);
-
-            {
-                BOOLEAN TimerCancelled;
-                Adapter->ResetInProgress = FALSE;
-                NdisMCancelTimer(&Adapter->DeferredTimer, &TimerCancelled);
-                if (!TimerCancelled)
-                {
-                    LanceFlushQueuedDpcs();
-                    NdisMCancelTimer(&Adapter->DeferredTimer, &TimerCancelled);
-                    if (!TimerCancelled)
-                    {
-                        LanceFlushQueuedDpcs();
-                    }
-                }
-            }
-
-            MmFreeContiguousMemory(Adapter->MmMappedBaseAddr);
-            Adapter->SharedMemoryAllocated = FALSE;
-
-            DeleteAdapterMemory(Adapter);
-
-        }
+        LanceStartChip(Adapter);
 
         return Status;
 
@@ -1721,22 +1706,24 @@ Return Value:
 
     PAGED_CODE();
 
-    SetInitBlockAndInit(Adapter);
+    //
+    // The interrupt is not registered during the first initialization, so
+    // there is no ISR that can race these register accesses.  Keep the
+    // CSR1/CSR2/INIT sequence synchronized only for runtime resets.
+    //
+    LanceSetInitializationBlock(Adapter);
+    LanceSyncStartInit(Adapter);
 
     //
-    // LanceIsr clears FirstInitialization when it sees IDON.  Initializing
-    // takes microseconds, but early in a cold boot the interrupt can be
-    // late or lost, which used to fail the start with Code 10.  So also
-    // look at CSR0 ourselves every 10 ms, and give up after 2 seconds.
+    // With no ISR connected yet, poll and acknowledge IDON ourselves.
+    // Initializing takes microseconds, but early in a cold boot the status
+    // can be late, so check CSR0 every 10 ms and give up after 2 seconds.
     //
     for (i = 0; i < 200; i++)
     {
         NdisMSleep(10000);
 
-        if (NdisMSynchronizeWithInterrupt(
-                &Adapter->Interrupt,
-                LanceSyncPollInitDone,
-                (PVOID)Adapter))
+        if (LanceSyncPollInitDone(Adapter))
         {
             break;
         }
@@ -1748,12 +1735,6 @@ Return Value:
     //
     if (!Adapter->FirstInitialization)
     {
-        //
-        // We can start the chip.  We may not
-        // have any bindings to indicateto but this
-        // is unimportant.
-        //
-        LanceStartChip(Adapter);
         return NDIS_STATUS_SUCCESS;
     }
     else
