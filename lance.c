@@ -2155,8 +2155,6 @@ Return Value:
     //
     USHORT Csr = 0;
     LANCE_INTERRUPT_STATUS InterruptStatus;
-    BOOLEAN DeferReceiveProcessing = FALSE;
-
     LOG(IN_DPC);
 
     InterruptStatus.Adapter = Adapter;
@@ -2363,29 +2361,14 @@ Return Value:
         }
 
         //
-        // Check the interrupt vector and see if there are any
-        // more receives to process.  After processing another interrupt
-        // source, come back to the top of the loop to check for receives
-        // that arrived in the meantime, unless the receive batch limit
-        // requires us to yield to the deferred timer.  Once yielded, leave
-        // receives to the timer for the rest of this pass.
+        // Check the interrupt vector and process all receive descriptors
+        // that are available.
         //
-        if ((Csr & LANCE_CSR0_RECEIVER_INTERRUPT) && !DeferReceiveProcessing)
+        if (Csr & LANCE_CSR0_RECEIVER_INTERRUPT)
         {
             if (ProcessReceiveInterrupts(Adapter))
             {
                 Csr &= ~LANCE_CSR0_RECEIVER_INTERRUPT;
-            }
-            else
-            {
-                //
-                // Yield after one receive batch.  The interrupt was
-                // already acknowledged, so the timer will queue receive
-                // work again for the next DPC pass.
-                //
-                Csr &= ~LANCE_CSR0_RECEIVER_INTERRUPT;
-                NdisMSetTimer(&Adapter->DeferredTimer, 1);
-                DeferReceiveProcessing = TRUE;
             }
         }
 
@@ -2446,34 +2429,6 @@ Return Value:
 
 LoopBottom:;
 
-        //
-        // ProcessTransmitInterrupts finishes one send per call, so keep
-        // looping until it runs out of work even after yielding receives.
-        // Leaving with TINT still set would strand finished sends: the
-        // deferred timer only queues receive work, and once the transmit
-        // buffers are used up no new send can complete to raise TINT again.
-        //
-        if (DeferReceiveProcessing &&
-            !(Csr & LANCE_CSR0_TRANSMITTER_INTERRUPT))
-        {
-            //
-            // A receive interrupt that came in while we finished the sends
-            // was taken out of PendingInterruptStatus by the read at the
-            // top of the loop.  Put it back so the DPC the ISR queued for
-            // it handles the new frames, instead of leaving them until the
-            // timer fires a clock tick later.
-            //
-            if (Csr & LANCE_CSR0_RECEIVER_INTERRUPT)
-            {
-                NdisMSynchronizeWithInterrupt(
-                    &Adapter->Interrupt,
-                    LanceSyncQueueReceiveInterrupt,
-                    Adapter
-                );
-            }
-
-            break;
-        }
     }
 
     //
@@ -4188,7 +4143,6 @@ Return Value:
     // need to get it from the adapter all the time.
     //
     const UINT TopReceiveIndex = Adapter->NumberOfReceiveRings - 1;
-    const UINT ReceivePacketLimit = Adapter->NumberOfReceiveRings / 2;
 
     //
     // Boolean to record the fact that we've finished processing
@@ -4227,16 +4181,6 @@ Return Value:
             LOG(RECEIVE);
 
             return(TRUE);
-        }
-        else if (ReceivePacketCount >= ReceivePacketLimit)
-        {
-            //
-            // Amortize interrupt synchronization over a larger receive
-            // batch while keeping each pass bounded by half the ring.
-            //
-            LOG(RECEIVE)
-
-            return(FALSE);
         }
         else if (ReceiveSummaryBits & LANCE_RECEIVE_ERROR_SUMMARY)
         {
