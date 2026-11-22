@@ -90,6 +90,11 @@ On a crash, KDBG drops to its own prompt on the serial port; `bt` shows the stac
 
 Run every item on both adapter types. Write down the result and anything odd in the debug output.
 
+For the setup hang, also install ReactOS with this driver included and the
+network adapter enabled. Verify that Installing Devices completes. If it
+hangs, capture the serial debug log and a KDBG backtrace; the chip ID line
+alone does not confirm that initialization completed.
+
 | # | Test | How | Pass when |
 |---|---|---|---|
 | 1 | Driver loads | Boot after install | Chip ID line in debug output; Device Manager shows no error; `sc query pcntn5m` reports RUNNING |

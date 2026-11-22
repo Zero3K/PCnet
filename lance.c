@@ -103,14 +103,6 @@ UINT LanceGlobalSupportedOids[] = {
     };
 
 //
-// We define a constant csr0 value that is useful for initializing
-// an already stopped LANCE.
-//
-// This also enables the chip for interrupts.
-//
-#define LANCE_CSR0_INIT_CHIP ((USHORT)0x41)
-
-//
 // We define a constant csr0 value that is useful for clearing all of
 // the interesting bits that *could* be set on an interrupt.
 //
@@ -1636,8 +1628,8 @@ Return Value:
         }
 
         //
-        // Connect the interrupt only after INIT has completed.  The chip
-        // is still stopped, so it cannot use the rings until started below.
+        // Connect the interrupt only after INIT has completed, with
+        // interrupts disabled until the chip is started below.
         //
         Status = NdisMRegisterInterrupt(
                      &Adapter->Interrupt,
@@ -1657,6 +1649,8 @@ Return Value:
                 NDIS_ERROR_CODE_INTERRUPT_CONNECT,
                 0
                 );
+
+            LanceSyncStopChip(Adapter);
 
             MmFreeContiguousMemory(Adapter->MmMappedBaseAddr);
             Adapter->SharedMemoryAllocated = FALSE;
@@ -1983,9 +1977,8 @@ LanceSyncPollInitDone(
 
 Routine Description:
 
-    Used by LanceInitialInit, with the ISR locked out, to check for IDON
-    without depending on the interrupt.  If CSR0 shows IDON before the
-    ISR has seen it, acknowledge it the same way the ISR would.
+    Used by LanceInitialInit before the ISR is registered to check and
+    acknowledge IDON without enabling interrupts.
 
 Return Value:
 
@@ -2015,13 +2008,10 @@ Return Value:
     //
     LANCE_ISR_WRITE_RDP(
         Adapter,
-        (USHORT)(LANCE_CSR0_INITIALIZATION_DONE | LANCE_CSR0_INTERRUPT_ENABLE)
+        LANCE_CSR0_INITIALIZATION_DONE
     );
 
     Adapter->FirstInitialization = FALSE;
-
-    DbgPrint("PCnet: IDON found by polling CSR0 (0x%04x); "
-             "the init interrupt was not delivered.\n", Csr);
 
     return TRUE;
 }
@@ -4972,8 +4962,7 @@ Return Value:
 
     //
     // Selecting CSR1/CSR2 moves RAP away from CSR0, so do it with the ISR
-    // locked out on every processor.  IDON is reported by interrupt:
-    // LanceInitialInit waits for it, the reset path handles it in
+    // locked out on every processor.  The reset path handles IDON in
     // LanceHandleInterrupt.
     //
     NdisMSynchronizeWithInterrupt(
@@ -5013,10 +5002,15 @@ LanceSyncStartInit(
     LANCE_WRITE_RDP(Adapter, LANCE_GET_CSR2_ADDRESS(PhysAdr));
 
     //
-    // Write to csr0 to initialize the chip.
+    // The first INIT is polled before an ISR is registered.  Enabling
+    // interrupts there could assert the shared IRQ with no handler.
+    // Runtime resets need IDON interrupts to complete asynchronously.
     //
     LANCE_WRITE_RAP(Adapter, LANCE_SELECT_CSR0);
-    LANCE_WRITE_RDP(Adapter, LANCE_CSR0_INIT_CHIP);
+    LANCE_WRITE_RDP(Adapter,
+                    (USHORT)(LANCE_CSR0_INITIALIZE |
+                             (Adapter->FirstInitialization ? 0 :
+                              LANCE_CSR0_INTERRUPT_ENABLE)));
 
     return(FALSE);
 }
