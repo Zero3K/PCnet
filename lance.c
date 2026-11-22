@@ -2367,9 +2367,10 @@ Return Value:
         // more receives to process.  After processing another interrupt
         // source, come back to the top of the loop to check for receives
         // that arrived in the meantime, unless the receive batch limit
-        // requires us to yield to the deferred timer.
+        // requires us to yield to the deferred timer.  Once yielded, leave
+        // receives to the timer for the rest of this pass.
         //
-        if (Csr & LANCE_CSR0_RECEIVER_INTERRUPT)
+        if ((Csr & LANCE_CSR0_RECEIVER_INTERRUPT) && !DeferReceiveProcessing)
         {
             if (ProcessReceiveInterrupts(Adapter))
             {
@@ -2445,7 +2446,15 @@ Return Value:
 
 LoopBottom:;
 
-        if (DeferReceiveProcessing)
+        //
+        // ProcessTransmitInterrupts finishes one send per call, so keep
+        // looping until it runs out of work even after yielding receives.
+        // Leaving with TINT still set would strand finished sends: the
+        // deferred timer only queues receive work, and once the transmit
+        // buffers are used up no new send can complete to raise TINT again.
+        //
+        if (DeferReceiveProcessing &&
+            !(Csr & LANCE_CSR0_TRANSMITTER_INTERRUPT))
         {
             break;
         }
