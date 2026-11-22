@@ -278,7 +278,7 @@ typedef struct _LANCE_BUFFER_DESCRIPTOR {
 // Define Maximum number of bytes a protocol can read during a
 // receive data indication.
 //
-#define LANCE_MAX_LOOKAHEAD ( 248 - LANCE_HEADER_SIZE )
+#define LANCE_MAX_LOOKAHEAD ( LANCE_LARGE_BUFFER_SIZE - LANCE_HEADER_SIZE )
 
 //
 // What a receive indication actually carries after the header: the rest
