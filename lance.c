@@ -132,6 +132,13 @@ typedef VOID (*LANCE_FLUSH_QUEUED_DPCS)(VOID);
 static LANCE_FLUSH_QUEUED_DPCS LanceKeFlushQueuedDpcs = NULL;
 
 STATIC
+BOOLEAN
+NTAPI
+LanceSyncStopChip(
+    IN PVOID Context
+    );
+
+STATIC
 VOID
 LanceFlushQueuedDpcs(
     VOID
