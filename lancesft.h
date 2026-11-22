@@ -797,13 +797,6 @@ typedef enum _LANCE_PROC_ID {
     LANCE_ISR_READ_RDP(A,C);\
 }
 
-BOOLEAN
-NTAPI
-LanceSyncStopChip(
-    IN PVOID Context
-    );
-
-
 //
 // We define the external interfaces to the lance driver.
 // These routines are only external to permit separate
