@@ -114,7 +114,7 @@ If a test fails, keep the debug output and note the test number. A `!analyze -v`
 
 For the DMA window change, run test 11 (cold boot) at least 5 times on Windows 7 x64 with 2 GB or more of guest RAM. That's the case that failed with Code 10. With a kernel debugger, check these:
 
-- The init block, rings, receive buffers and transmit buffers are all in one allocation of about 60 KB.
+- The init block, rings, receive buffers and transmit buffers are all in one allocation of 216,088 bytes (about 211 KiB). `AmountOfHardwareMemory` in the adapter structure should read 0x34C18.
 - That allocation is below 4 GB and does not cross a 16 MB boundary. With more guest RAM its top address byte (bits 31:24) is usually not 0.
 - CSR2 reads back that byte in bits 15:8. If the allocation failure can be injected, check that init fails cleanly: the DMA allocation is logged as a resource conflict and the device is left stopped.
 
