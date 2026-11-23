@@ -11,7 +11,7 @@ This branch sits on top of `master` as of `c723dfb` (merge of #17), so it keeps 
 
 **Windows 7 x64 cold boot, Code 10** (#53, #55): every DMA allocation was limited to the first 16 MB of RAM. Early in a cold boot on x64 that memory is mostly in use, so the allocation failed. A disable/enable or a warm reboot happened to find room, which is why those worked. The chip doesn't need memory below 16 MB. In 16-bit mode the PCnet-PCI chips take bits 31:24 of every bus-master address (init block, rings and buffers) from CSR2[15:8] (IADR[31:24]). So the driver now:
 
-- allocates all of its DMA memory as one block of about 60 KB: init block, rings, receive buffers and transmit buffers. Before, it made 101 separate page-sized allocations, about 400 KB in all;
+- allocates all of its DMA memory as one physically contiguous block: init block, rings, receive buffers and transmit buffers. Before, it made 101 separate page-sized allocations, about 400 KB in all. The block was about 60 KB when this fix was made; since the rings and buffer pools grew to 64 entries each (see Performance) it is 216,088 bytes (about 211 KiB), so test 11 has to be repeated with the larger block;
 - places that block anywhere below 4 GB, without crossing a 16 MB boundary;
 - writes the full upper 16 address bits to CSR2 (it used to write 0 in bits 15:8).
 

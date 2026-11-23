@@ -1412,7 +1412,8 @@ Return Value:
     //
     // One block holds everything the chip touches: init block, rings,
     // receive buffers and transmit copy buffers, each carved out by
-    // LANCE_ALLOCATE_MEMORY_FOR_HARDWARE in 8-byte steps.  About 60 KB.
+    // LANCE_ALLOCATE_MEMORY_FOR_HARDWARE in 8-byte steps.  With 64-entry
+    // rings and buffer pools that is 216,088 bytes (about 211 KiB).
     //
 #define LANCE_HW_ROUND(S) ((((ULONG)(S)) + 7) & ~7UL)
     Adapter->AmountOfHardwareMemory =
@@ -1432,8 +1433,8 @@ Return Value:
         // cross a 16 MB boundary: the chip gets bits 31:24 of every
         // address from CSR2 (see LANCE_DMA_WINDOW_SIZE).  Insisting on the
         // first 16 MB made this fail early in a cold boot on x64, when
-        // that memory is mostly taken (Code 10).  One allocation of about
-        // 60 KB replaces the 101 separate page-sized ones used before.
+        // that memory is mostly taken (Code 10).  This one allocation
+        // replaced the 101 separate page-sized ones used before.
         //
         NDIS_PHYSICAL_ADDRESS LowestAcceptableAddress =
             NDIS_PHYSICAL_ADDRESS_CONST(0, 0);
