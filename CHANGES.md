@@ -11,7 +11,7 @@ This branch sits on top of `master` as of `c723dfb` (merge of #17), so it keeps 
 
 **Windows 7 x64 cold boot, Code 10** (#53, #55): every DMA allocation was limited to the first 16 MB of RAM. Early in a cold boot on x64 that memory is mostly in use, so the allocation failed. A disable/enable or a warm reboot happened to find room, which is why those worked. The chip doesn't need memory below 16 MB. In 16-bit mode the PCnet-PCI chips take bits 31:24 of every bus-master address (init block, rings and buffers) from CSR2[15:8] (IADR[31:24]). So the driver now:
 
-- allocates all of its DMA memory as one physically contiguous block: init block, rings, receive buffers and transmit buffers. Before, it made 101 separate page-sized allocations, about 400 KB in all. The block was about 60 KB when this fix was made; since the rings and buffer pools grew to 64 entries each (see Performance) it is 216,088 bytes (about 211 KiB), so test 11 has to be repeated with the larger block;
+- allocates all of its DMA memory as one physically contiguous block: init block, rings, receive buffers and transmit buffers. Before, it made 101 separate page-sized allocations, about 400 KB in all. With 128-entry receive rings and large buffers (see Performance), the block is 411,160 bytes (about 402 KiB), so test 11 has to be repeated with the larger block;
 - places that block anywhere below 4 GB, without crossing a 16 MB boundary;
 - writes the full upper 16 address bits to CSR2 (it used to write 0 in bits 15:8).
 
@@ -113,7 +113,7 @@ Each entry gives what was wrong, what changed, and how to verify it. The test nu
 
 ## Performance
 
-The driver still copies every transmitted packet into a bounce buffer in the shared DMA block, but each buffer pool now has 64 entries to match the transmit ring and reduce send-queue stalls. The receive ring uses 64 full-frame buffers, including room for the four-byte FCS, so each packet needs only one descriptor and the full packet is available as lookahead. Receive processing handles up to half the ring (32 packets) per bounded pass and schedules an immediate continuation if packets remain, rather than waiting for a timer tick while the ring fills. The shared DMA block is about 211 KiB and remains within the chip's 16 MB DMA window. Throughput should be checked with the sustained-transfer tests in TESTING.md; in VirtualBox, the **Intel PRO/1000 MT** adapter type may still be faster and has built-in drivers on XP through Windows 11.
+The driver still copies every transmitted packet into a bounce buffer in the shared DMA block, with 64-entry small and medium pools and a 128-entry large pool. The receive ring uses 128 full-frame buffers, including room for the four-byte FCS, so each packet needs only one descriptor and the full packet is available as lookahead. Receive processing drains the complete ring in one bounded pass, then schedules a zero-delay continuation if the hardware refills descriptors while that pass runs. The shared DMA block is about 402 KiB and remains within the chip's 16 MB DMA window. Throughput should be checked with the sustained-transfer tests in TESTING.md; in VirtualBox, the **Intel PRO/1000 MT** adapter type may still be faster and has built-in drivers on XP through Windows 11.
 
 ## Known issues not fixed
 

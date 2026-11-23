@@ -1412,8 +1412,8 @@ Return Value:
     //
     // One block holds everything the chip touches: init block, rings,
     // receive buffers and transmit copy buffers, each carved out by
-    // LANCE_ALLOCATE_MEMORY_FOR_HARDWARE in 8-byte steps.  With 64-entry
-    // rings and buffer pools that is 216,088 bytes (about 211 KiB).
+    // LANCE_ALLOCATE_MEMORY_FOR_HARDWARE in 8-byte steps.  With 128-entry
+    // receive rings and large buffer pool that is about 402 KiB.
     //
 #define LANCE_HW_ROUND(S) ((((ULONG)(S)) + 7) & ~7UL)
     Adapter->AmountOfHardwareMemory =
@@ -4188,7 +4188,7 @@ Return Value:
     // need to get it from the adapter all the time.
     //
     const UINT TopReceiveIndex = Adapter->NumberOfReceiveRings - 1;
-    const UINT ReceivePacketLimit = Adapter->NumberOfReceiveRings / 2;
+    const UINT ReceivePacketLimit = Adapter->NumberOfReceiveRings;
 
     //
     // Boolean to record the fact that we've finished processing
