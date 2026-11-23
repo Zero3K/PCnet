@@ -903,6 +903,63 @@ Routine Description:
     USHORT Bcr4;
     BOOLEAN LinkUp;
 
+#if DBG
+    //
+    // NDIS calls this periodically (normally about every two seconds).
+    // Snapshot deltas make it possible to compare the driver activity
+    // during fast and slow download intervals without logging packets.
+    //
+    if (!Adapter->DebugCountersInitialized)
+    {
+        Adapter->DebugCountersInitialized = TRUE;
+        Adapter->DebugLastReceive = Adapter->Receive;
+        Adapter->DebugLastTransmit = Adapter->Transmit;
+        Adapter->DebugLastMissedPacket = Adapter->MissedPacket;
+        Adapter->DebugLastOutOfReceiveBuffers = Adapter->OutOfReceiveBuffers;
+        Adapter->DebugLastCRCError = Adapter->CRCError;
+        Adapter->DebugLastFramingError = Adapter->FramingError;
+        Adapter->DebugLastLengthError = Adapter->LengthError;
+        Adapter->DebugLastRetryFailure = Adapter->RetryFailure;
+        Adapter->DebugLastUnderFlow = Adapter->UnderFlow;
+
+        DbgPrint("pcntn5m: periodic baseline; receive=%lu transmit=%lu "
+                 "available_tx=%lu reset=%u\n",
+                 Adapter->Receive,
+                 Adapter->Transmit,
+                 (UINT)Adapter->NumberOfAvailableRings,
+                 (UINT)Adapter->ResetInProgress);
+    }
+    else
+    {
+        DbgPrint("pcntn5m: periodic delta; receive=+%lu transmit=+%lu "
+                 "missed=+%lu no_buffer=+%lu crc=+%lu framing=+%lu "
+                 "length=+%lu retry=+%lu underflow=+%lu available_tx=%lu "
+                 "reset=%u\n",
+                 Adapter->Receive - Adapter->DebugLastReceive,
+                 Adapter->Transmit - Adapter->DebugLastTransmit,
+                 Adapter->MissedPacket - Adapter->DebugLastMissedPacket,
+                 Adapter->OutOfReceiveBuffers -
+                     Adapter->DebugLastOutOfReceiveBuffers,
+                 Adapter->CRCError - Adapter->DebugLastCRCError,
+                 Adapter->FramingError - Adapter->DebugLastFramingError,
+                 Adapter->LengthError - Adapter->DebugLastLengthError,
+                 Adapter->RetryFailure - Adapter->DebugLastRetryFailure,
+                 Adapter->UnderFlow - Adapter->DebugLastUnderFlow,
+                 (UINT)Adapter->NumberOfAvailableRings,
+                 (UINT)Adapter->ResetInProgress);
+
+        Adapter->DebugLastReceive = Adapter->Receive;
+        Adapter->DebugLastTransmit = Adapter->Transmit;
+        Adapter->DebugLastMissedPacket = Adapter->MissedPacket;
+        Adapter->DebugLastOutOfReceiveBuffers = Adapter->OutOfReceiveBuffers;
+        Adapter->DebugLastCRCError = Adapter->CRCError;
+        Adapter->DebugLastFramingError = Adapter->FramingError;
+        Adapter->DebugLastLengthError = Adapter->LengthError;
+        Adapter->DebugLastRetryFailure = Adapter->RetryFailure;
+        Adapter->DebugLastUnderFlow = Adapter->UnderFlow;
+    }
+#endif
+
     //
     // A reset is running.  Sends get RESOURCES until it finishes, so
     // no send arms the timer, and if its IDON interrupt went missing
@@ -1548,6 +1605,16 @@ Return Value:
 #if DBG
         Adapter->ReceiveBatchLimitCount = 0;
         Adapter->DeferredReceiveTimerCount = 0;
+        Adapter->DebugLastReceive = 0;
+        Adapter->DebugLastTransmit = 0;
+        Adapter->DebugLastMissedPacket = 0;
+        Adapter->DebugLastOutOfReceiveBuffers = 0;
+        Adapter->DebugLastCRCError = 0;
+        Adapter->DebugLastFramingError = 0;
+        Adapter->DebugLastLengthError = 0;
+        Adapter->DebugLastRetryFailure = 0;
+        Adapter->DebugLastUnderFlow = 0;
+        Adapter->DebugCountersInitialized = FALSE;
 #endif
         Adapter->CRCError = 0;
         Adapter->FramingError = 0;

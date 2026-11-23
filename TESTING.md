@@ -93,6 +93,16 @@ event), so debug output does not print every batch or lost packet:
 
 The driver queues a zero-delay timer continuation after each bounded
 half-ring receive batch instead of waiting one millisecond before resuming.
+Each periodic `pcntn5m: periodic delta` line is one CheckForHang interval
+(normally about two seconds) and reports counter changes since the previous
+line. Compare these deltas during fast and slow periods:
+
+- `receive`/`transmit`: packets successfully processed by each path.
+- `missed`, `no_buffer`, `crc`, `framing`, `length`, `retry`, and `underflow`:
+  errors or retransmission indicators during that interval.
+- `available_tx` and `reset`: transmit capacity and reset state at the
+  snapshot.
+
 Start the download, break into WinDbg only when a slowdown is visible, then
 use the adapter address to compare `Receive`, `Transmit`, `MissedPacket`,
 `OutOfReceiveBuffers`, `MemoryError`, `UnderFlow`, `NumberOfAvailableRings`,

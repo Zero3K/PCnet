@@ -555,6 +555,16 @@ typedef struct _LANCE_ADAPTER {
 #if DBG
     UINT ReceiveBatchLimitCount;
     UINT DeferredReceiveTimerCount;
+    UINT DebugLastReceive;
+    UINT DebugLastTransmit;
+    UINT DebugLastMissedPacket;
+    UINT DebugLastOutOfReceiveBuffers;
+    UINT DebugLastCRCError;
+    UINT DebugLastFramingError;
+    UINT DebugLastLengthError;
+    UINT DebugLastRetryFailure;
+    UINT DebugLastUnderFlow;
+    BOOLEAN DebugCountersInitialized;
 #endif
     UINT CRCError;
     UINT FramingError;
