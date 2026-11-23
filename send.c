@@ -191,7 +191,37 @@ Return Value:
 
     if (!Adapter->ResetInProgress) {
 
+        #if DBG
+        if (Adapter->TransmitResourcesReported &&
+            Adapter->NumberOfAvailableRings > 0)
+        {
+            DbgPrint("pcntn5m: [%I64u] transmit resources recovered; "
+                     "available_tx=%lu\n",
+                     LanceGetDebugTimestamp(),
+                     (UINT)Adapter->NumberOfAvailableRings);
+            Adapter->TransmitResourcesReported = FALSE;
+        }
+        #endif
+
         if (Adapter->NumberOfAvailableRings == 0) {
+
+            #if DBG
+            if (!Adapter->TransmitResourcesReported)
+            {
+                DbgPrint("pcntn5m: [%I64u] transmit ring exhausted; "
+                         "receive=%lu "
+                         "transmit=%lu missed=%lu no_buffer=%lu "
+                         "underflow=%lu reset=%u\n",
+                         LanceGetDebugTimestamp(),
+                         Adapter->Receive,
+                         Adapter->Transmit,
+                         Adapter->MissedPacket,
+                         Adapter->OutOfReceiveBuffers,
+                         Adapter->UnderFlow,
+                         (UINT)Adapter->ResetInProgress);
+                Adapter->TransmitResourcesReported = TRUE;
+            }
+            #endif
 
             return(NDIS_STATUS_RESOURCES);
 

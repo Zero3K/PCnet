@@ -74,6 +74,47 @@ Useful commands once connected:
 - `lm m pcntn5m`: confirms the module is loaded and shows its base address.
 - `bp pcntn5m!LanceIsr` / `bp pcntn5m!LanceHandleInterrupt`: if no traffic flows, these show whether interrupts arrive at all. Clear them afterwards; they fire on every packet.
 
+For slowdown diagnosis, build `pcntn5m.sys` with `DBG=1` or use a
+kernel-debug build. Receive-batch, deferred-timer, missed-packet, and
+receive-buffer diagnostics are sampled every 256 events (plus the first
+event), so debug output does not print every batch or lost packet. Every
+`pcntn5m:` diagnostic begins with a UTC Unix-epoch timestamp in milliseconds
+(`pcntn5m: [1795450000123] ...`). Convert Steam's local timestamps to UTC when
+comparing the two logs.
+
+- `receive batch sample` / `deferred timer`: receive processing yielded or
+  resumed; the counters in each line show whether misses track batch pressure.
+- `missed packet sample`, `receive buffer error sample`, `receive overflow
+  sample`: receive descriptor or missed-frame pressure increased.
+  `MissedPacket` counts CSR0 missed-packet interrupt indications; it is not
+  an exact count of dropped frames.
+- `transmit ring exhausted` / `transmit resources recovered`: send resources
+  reached zero and later became available.
+- `transmitter stopped`, `memory error`, `reset started`, and
+  `reset/INIT complete`: hardware or reset state changed.
+- `media state`: link status changed.
+
+The driver drains the complete 128-entry receive ring in one bounded pass and
+queues a zero-delay timer continuation if more work remains. This avoids
+turning the continuation timer into a normal half-ring receive-processing
+step under sustained traffic.
+Each periodic `pcntn5m: periodic delta` line is one CheckForHang interval
+(normally about two seconds) and reports counter changes since the previous
+line. Compare these deltas during fast and slow periods:
+
+- `receive`/`transmit`: packets successfully processed by each path.
+- `missed`, `no_buffer`, `crc`, `framing`, `length`, `retry`, and `underflow`:
+  errors or retransmission indicators during that interval.
+- `available_tx` and `reset`: transmit capacity and reset state at the
+  snapshot.
+
+Start the download, break into WinDbg only when a slowdown is visible, then
+use the adapter address to compare `Receive`, `Transmit`, `MissedPacket`,
+`OutOfReceiveBuffers`, `MemoryError`, `UnderFlow`, `NumberOfAvailableRings`,
+and `ResetInProgress`. Let the VM run freely between one-second WinDbg
+break-ins; frequent breakpoints or per-packet printing can themselves alter
+the throughput pattern.
+
 Symbols: `objfre_wnet_x86\i386\pcntn5m.pdb`. Use `.sympath+ C:\tasks\PCnet\objfre_wnet_x86\i386` and then `.reload /f pcntn5m.sys`.
 
 ### ReactOS with its built-in KDBG (the default for release and nightly builds)
@@ -114,7 +155,7 @@ If a test fails, keep the debug output and note the test number. A `!analyze -v`
 
 For the DMA window change, run test 11 (cold boot) at least 5 times on Windows 7 x64 with 2 GB or more of guest RAM. That's the case that failed with Code 10. With a kernel debugger, check these:
 
-- The init block, rings, receive buffers and transmit buffers are all in one allocation of 216,088 bytes (about 211 KiB). `AmountOfHardwareMemory` in the adapter structure should read 0x34C18.
+- The init block, rings, receive buffers and transmit buffers are all in one allocation of about 60 KB.
 - That allocation is below 4 GB and does not cross a 16 MB boundary. With more guest RAM its top address byte (bits 31:24) is usually not 0.
 - CSR2 reads back that byte in bits 15:8. If the allocation failure can be injected, check that init fails cleanly: the DMA allocation is logged as a resource conflict and the device is left stopped.
 

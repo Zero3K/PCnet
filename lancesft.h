@@ -293,6 +293,9 @@ typedef struct _LANCE_BUFFER_DESCRIPTOR {
 
 
 
+ULONGLONG
+LanceGetDebugTimestamp(VOID);
+
 typedef struct _LANCE_ADAPTER {
 
     //
@@ -552,6 +555,20 @@ typedef struct _LANCE_ADAPTER {
     // Can only be accessed when the adapter lock is held.
     //
     UINT OutOfReceiveBuffers;
+#if DBG
+    UINT ReceiveBatchLimitCount;
+    UINT DeferredReceiveTimerCount;
+    UINT DebugLastReceive;
+    UINT DebugLastTransmit;
+    UINT DebugLastMissedPacket;
+    UINT DebugLastOutOfReceiveBuffers;
+    UINT DebugLastCRCError;
+    UINT DebugLastFramingError;
+    UINT DebugLastLengthError;
+    UINT DebugLastRetryFailure;
+    UINT DebugLastUnderFlow;
+    BOOLEAN DebugCountersInitialized;
+#endif
     UINT CRCError;
     UINT FramingError;
     UINT LengthError;       // frames dropped for an impossible length
@@ -607,6 +624,11 @@ typedef struct _LANCE_ADAPTER {
     // completes the request.
     //
     BOOLEAN ReinitAfterReset;
+    //
+    // Set while transmit resources are exhausted, so debug logging reports
+    // the transition once instead of on every send retry.
+    //
+    BOOLEAN TransmitResourcesReported;
 
     //
     // During an indication this is set to the current indications context

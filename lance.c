@@ -50,6 +50,17 @@ UCHAR LanceSendFailPlace = 0;
 NDIS_HANDLE LanceNdisWrapperHandle = NULL;
 PDRIVER_OBJECT LanceDriverObject = NULL;
 
+ULONGLONG
+LanceGetDebugTimestamp(VOID)
+{
+    LARGE_INTEGER SystemTime;
+
+    KeQuerySystemTime(&SystemTime);
+
+    return ((ULONGLONG)SystemTime.QuadPart -
+            116444736000000000ULL) / 10000;
+}
+
 #if LANCELOG
 
 UCHAR Log[LOG_SIZE] = {0};
@@ -903,6 +914,65 @@ Routine Description:
     USHORT Bcr4;
     BOOLEAN LinkUp;
 
+#if DBG
+    //
+    // NDIS calls this periodically (normally about every two seconds).
+    // Snapshot deltas make it possible to compare the driver activity
+    // during fast and slow download intervals without logging packets.
+    //
+    if (!Adapter->DebugCountersInitialized)
+    {
+        Adapter->DebugCountersInitialized = TRUE;
+        Adapter->DebugLastReceive = Adapter->Receive;
+        Adapter->DebugLastTransmit = Adapter->Transmit;
+        Adapter->DebugLastMissedPacket = Adapter->MissedPacket;
+        Adapter->DebugLastOutOfReceiveBuffers = Adapter->OutOfReceiveBuffers;
+        Adapter->DebugLastCRCError = Adapter->CRCError;
+        Adapter->DebugLastFramingError = Adapter->FramingError;
+        Adapter->DebugLastLengthError = Adapter->LengthError;
+        Adapter->DebugLastRetryFailure = Adapter->RetryFailure;
+        Adapter->DebugLastUnderFlow = Adapter->UnderFlow;
+
+        DbgPrint("pcntn5m: [%I64u] periodic baseline; receive=%lu transmit=%lu "
+                 "available_tx=%lu reset=%u\n",
+                 LanceGetDebugTimestamp(),
+                 Adapter->Receive,
+                 Adapter->Transmit,
+                 (UINT)Adapter->NumberOfAvailableRings,
+                 (UINT)Adapter->ResetInProgress);
+    }
+    else
+    {
+        DbgPrint("pcntn5m: [%I64u] periodic delta; receive=+%lu transmit=+%lu "
+                 "missed=+%lu no_buffer=+%lu crc=+%lu framing=+%lu "
+                 "length=+%lu retry=+%lu underflow=+%lu available_tx=%lu "
+                 "reset=%u\n",
+                 LanceGetDebugTimestamp(),
+                 Adapter->Receive - Adapter->DebugLastReceive,
+                 Adapter->Transmit - Adapter->DebugLastTransmit,
+                 Adapter->MissedPacket - Adapter->DebugLastMissedPacket,
+                 Adapter->OutOfReceiveBuffers -
+                     Adapter->DebugLastOutOfReceiveBuffers,
+                 Adapter->CRCError - Adapter->DebugLastCRCError,
+                 Adapter->FramingError - Adapter->DebugLastFramingError,
+                 Adapter->LengthError - Adapter->DebugLastLengthError,
+                 Adapter->RetryFailure - Adapter->DebugLastRetryFailure,
+                 Adapter->UnderFlow - Adapter->DebugLastUnderFlow,
+                 (UINT)Adapter->NumberOfAvailableRings,
+                 (UINT)Adapter->ResetInProgress);
+
+        Adapter->DebugLastReceive = Adapter->Receive;
+        Adapter->DebugLastTransmit = Adapter->Transmit;
+        Adapter->DebugLastMissedPacket = Adapter->MissedPacket;
+        Adapter->DebugLastOutOfReceiveBuffers = Adapter->OutOfReceiveBuffers;
+        Adapter->DebugLastCRCError = Adapter->CRCError;
+        Adapter->DebugLastFramingError = Adapter->FramingError;
+        Adapter->DebugLastLengthError = Adapter->LengthError;
+        Adapter->DebugLastRetryFailure = Adapter->RetryFailure;
+        Adapter->DebugLastUnderFlow = Adapter->UnderFlow;
+    }
+#endif
+
     //
     // A reset is running.  Sends get RESOURCES until it finishes, so
     // no send arms the timer, and if its IDON interrupt went missing
@@ -961,6 +1031,13 @@ Routine Description:
 
     if (LinkUp != Adapter->MediaConnected)
     {
+        #if DBG
+        DbgPrint("pcntn5m: [%I64u] media state %s (BCR4=0x%04x)\n",
+                 LanceGetDebugTimestamp(),
+                 LinkUp ? "connected" : "disconnected",
+                 Bcr4);
+        #endif
+
         Adapter->MediaConnected = LinkUp;
 
         NdisMIndicateStatus(
@@ -1216,7 +1293,9 @@ LanceIdentifyChip(
             break;
     }
 
-    DbgPrint("pcntn5m: %s, chip ID 0x%08lx, PCI 1022:%04x, I/O 0x%lx, IRQ %u\n",
+    DbgPrint("pcntn5m: [%I64u] %s, chip ID 0x%08lx, PCI 1022:%04x, "
+             "I/O 0x%lx, IRQ %u\n",
+             LanceGetDebugTimestamp(),
              Adapter->ChipName,
              Adapter->ChipId,
              Adapter->PciDeviceId,
@@ -1271,10 +1350,12 @@ Return Value:
         return TRUE;
     }
 
-    DbgPrint("pcntn5m: I/O 0x%lx does not answer in 16-bit WIO mode after "
+    DbgPrint("pcntn5m: [%I64u] I/O 0x%lx does not answer in 16-bit WIO mode "
+             "after "
              "reset (RAP readback 0x%04x, CSR0 0x%04x).  The chip may have "
              "been left in 32-bit DWIO mode by another driver; only a "
              "hardware reset (cold boot) clears that.\n",
+             LanceGetDebugTimestamp(),
              Adapter->IoPortBase, Rap, Csr0);
 
     return FALSE;
@@ -1412,8 +1493,7 @@ Return Value:
     //
     // One block holds everything the chip touches: init block, rings,
     // receive buffers and transmit copy buffers, each carved out by
-    // LANCE_ALLOCATE_MEMORY_FOR_HARDWARE in 8-byte steps.  With 64-entry
-    // rings and buffer pools that is 216,088 bytes (about 211 KiB).
+    // LANCE_ALLOCATE_MEMORY_FOR_HARDWARE in 8-byte steps.  About 60 KB.
     //
 #define LANCE_HW_ROUND(S) ((((ULONG)(S)) + 7) & ~7UL)
     Adapter->AmountOfHardwareMemory =
@@ -1433,8 +1513,8 @@ Return Value:
         // cross a 16 MB boundary: the chip gets bits 31:24 of every
         // address from CSR2 (see LANCE_DMA_WINDOW_SIZE).  Insisting on the
         // first 16 MB made this fail early in a cold boot on x64, when
-        // that memory is mostly taken (Code 10).  This one allocation
-        // replaced the 101 separate page-sized ones used before.
+        // that memory is mostly taken (Code 10).  One allocation of about
+        // 60 KB replaces the 101 separate page-sized ones used before.
         //
         NDIS_PHYSICAL_ADDRESS LowestAcceptableAddress =
             NDIS_PHYSICAL_ADDRESS_CONST(0, 0);
@@ -1540,6 +1620,20 @@ Return Value:
 
         Adapter->CurrentReceiveIndex = 0;
         Adapter->OutOfReceiveBuffers = 0;
+#if DBG
+        Adapter->ReceiveBatchLimitCount = 0;
+        Adapter->DeferredReceiveTimerCount = 0;
+        Adapter->DebugLastReceive = 0;
+        Adapter->DebugLastTransmit = 0;
+        Adapter->DebugLastMissedPacket = 0;
+        Adapter->DebugLastOutOfReceiveBuffers = 0;
+        Adapter->DebugLastCRCError = 0;
+        Adapter->DebugLastFramingError = 0;
+        Adapter->DebugLastLengthError = 0;
+        Adapter->DebugLastRetryFailure = 0;
+        Adapter->DebugLastUnderFlow = 0;
+        Adapter->DebugCountersInitialized = FALSE;
+#endif
         Adapter->CRCError = 0;
         Adapter->FramingError = 0;
         Adapter->RetryFailure = 0;
@@ -1551,6 +1645,7 @@ Return Value:
         Adapter->MoreThanOneRetry = 0;
         Adapter->ResetInProgress = FALSE;
         Adapter->ResetInitStarted = FALSE;
+        Adapter->TransmitResourcesReported = FALSE;
         Adapter->FirstInitialization = TRUE;
         Adapter->HardwareFailure = FALSE;
 
@@ -2114,6 +2209,26 @@ Return Value:
         return;
     }
 
+    #if DBG
+    Adapter->DeferredReceiveTimerCount++;
+
+    if (Adapter->ResetInProgress ||
+        ((Adapter->DeferredReceiveTimerCount & 0xff) == 1))
+    {
+        DbgPrint("pcntn5m: [%I64u] deferred timer; count=%lu receive=%lu "
+                 "batches=%lu missed=%lu no_buffer=%lu available_tx=%lu "
+                 "reset=%u\n",
+                 LanceGetDebugTimestamp(),
+                 Adapter->DeferredReceiveTimerCount,
+                 Adapter->Receive,
+                 Adapter->ReceiveBatchLimitCount,
+                 Adapter->MissedPacket,
+                 Adapter->OutOfReceiveBuffers,
+                 (UINT)Adapter->NumberOfAvailableRings,
+                 (UINT)Adapter->ResetInProgress);
+    }
+    #endif
+
     NdisMSynchronizeWithInterrupt(
         &Adapter->Interrupt,
         LanceSyncQueueReceiveInterrupt,
@@ -2231,6 +2346,21 @@ Return Value:
             Adapter->ResetInProgress = FALSE;
             Adapter->ResetInitStarted = FALSE;
 
+            #if DBG
+            DbgPrint("pcntn5m: [%I64u] reset/INIT complete; receive=%lu "
+                     "transmit=%lu "
+                     "missed=%lu no_buffer=%lu memory=%lu underflow=%lu "
+                     "available_tx=%lu\n",
+                     LanceGetDebugTimestamp(),
+                     Adapter->Receive,
+                     Adapter->Transmit,
+                     Adapter->MissedPacket,
+                     Adapter->OutOfReceiveBuffers,
+                     Adapter->MemoryError,
+                     Adapter->UnderFlow,
+                     (UINT)Adapter->NumberOfAvailableRings);
+            #endif
+
             if (Adapter->ReinitAfterReset)
             {
                 Adapter->ReinitAfterReset = FALSE;
@@ -2328,6 +2458,21 @@ Return Value:
             if (Csr & LANCE_CSR0_MISSED_PACKET)
             {
                 Adapter->MissedPacket++;
+                #if DBG
+                if ((Adapter->MissedPacket & 0xff) == 1)
+                {
+                    DbgPrint("pcntn5m: [%I64u] missed packet sample; "
+                             "total=%lu "
+                             "receive=%lu no_buffer=%lu batches=%lu "
+                             "available_tx=%lu\n",
+                             LanceGetDebugTimestamp(),
+                             Adapter->MissedPacket,
+                             Adapter->Receive,
+                             Adapter->OutOfReceiveBuffers,
+                             Adapter->ReceiveBatchLimitCount,
+                             (UINT)Adapter->NumberOfAvailableRings);
+                }
+                #endif
             }
             if (Csr & LANCE_CSR0_BABBLE)
             {
@@ -2353,6 +2498,16 @@ Return Value:
                 // transmitter.  Reset to get the device started again.
                 //
                 Adapter->MemoryError++;
+                #if DBG
+                DbgPrint("pcntn5m: [%I64u] memory error; total=%lu "
+                         "receive=%lu "
+                         "transmit=%lu reset=%u\n",
+                         LanceGetDebugTimestamp(),
+                         Adapter->MemoryError,
+                         Adapter->Receive,
+                         Adapter->Transmit,
+                         (UINT)Adapter->ResetInProgress);
+                #endif
 
                 SetupForReset(
                     Adapter,
@@ -2385,7 +2540,7 @@ Return Value:
                 // work again for the next DPC pass.
                 //
                 Csr &= ~LANCE_CSR0_RECEIVER_INTERRUPT;
-                NdisMSetTimer(&Adapter->DeferredTimer, 1);
+                NdisMSetTimer(&Adapter->DeferredTimer, 0);
                 DeferReceiveProcessing = TRUE;
             }
         }
@@ -2422,6 +2577,16 @@ Return Value:
                     // before its descriptor is processed, so count it here.
                     //
                     Adapter->UnderFlow++;
+                    #if DBG
+                    DbgPrint("pcntn5m: [%I64u] transmitter stopped; "
+                             "underflow=%lu "
+                             "receive=%lu transmit=%lu available_tx=%lu\n",
+                             LanceGetDebugTimestamp(),
+                             Adapter->UnderFlow,
+                             Adapter->Receive,
+                             Adapter->Transmit,
+                             (UINT)Adapter->NumberOfAvailableRings);
+                    #endif
 
                     SetupForReset(
                         Adapter,
@@ -4189,7 +4354,13 @@ Return Value:
     // need to get it from the adapter all the time.
     //
     const UINT TopReceiveIndex = Adapter->NumberOfReceiveRings - 1;
-    const UINT ReceivePacketLimit = Adapter->NumberOfReceiveRings / 2;
+    //
+    // Drain the complete receive ring in one bounded pass.  Limiting this
+    // to half the ring made the continuation timer part of the normal
+    // receive path and allowed the PCnet missed-packet bit to accumulate
+    // under sustained traffic.
+    //
+    const UINT ReceivePacketLimit = Adapter->NumberOfReceiveRings;
 
     //
     // Boolean to record the fact that we've finished processing
@@ -4232,10 +4403,30 @@ Return Value:
         else if (ReceivePacketCount >= ReceivePacketLimit)
         {
             //
-            // Amortize interrupt synchronization over a larger receive
-            // batch while keeping each pass bounded by half the ring.
+            // The complete ring has been processed.  Keep the continuation
+            // path for the case where the hardware refilled descriptors
+            // while this pass was running.
             //
             LOG(RECEIVE)
+
+            #if DBG
+            Adapter->ReceiveBatchLimitCount++;
+
+            if ((Adapter->ReceiveBatchLimitCount & 0xff) == 1)
+            {
+                DbgPrint("pcntn5m: [%I64u] receive batch sample; count=%lu "
+                         "packets=%lu receive=%lu missed=%lu no_buffer=%lu "
+                         "available_tx=%lu reset=%u\n",
+                         LanceGetDebugTimestamp(),
+                         Adapter->ReceiveBatchLimitCount,
+                         ReceivePacketCount,
+                         Adapter->Receive,
+                         Adapter->MissedPacket,
+                         Adapter->OutOfReceiveBuffers,
+                         (UINT)Adapter->NumberOfAvailableRings,
+                         (UINT)Adapter->ResetInProgress);
+            }
+            #endif
 
             return(FALSE);
         }
@@ -4256,6 +4447,16 @@ Return Value:
                 //
 
                 Adapter->OutOfReceiveBuffers++;
+                #if DBG
+                if ((Adapter->OutOfReceiveBuffers & 0xff) == 1)
+                {
+                    DbgPrint("pcntn5m: [%I64u] receive buffer error sample; "
+                             "no_buffer=%lu receive=%lu\n",
+                             LanceGetDebugTimestamp(),
+                             Adapter->OutOfReceiveBuffers,
+                             Adapter->Receive);
+                }
+                #endif
             }
             else if (ReceiveSummaryBits & LANCE_RECEIVE_FRAMING_ERROR)
             {
@@ -4272,6 +4473,16 @@ Return Value:
             else if (ReceiveSummaryBits & LANCE_RECEIVE_OVERFLOW_ERROR)
             {
                 Adapter->OutOfReceiveBuffers++;
+                #if DBG
+                if ((Adapter->OutOfReceiveBuffers & 0xff) == 1)
+                {
+                    DbgPrint("pcntn5m: [%I64u] receive overflow sample; "
+                             "no_buffer=%lu receive=%lu\n",
+                             LanceGetDebugTimestamp(),
+                             Adapter->OutOfReceiveBuffers,
+                             Adapter->Receive);
+                }
+                #endif
             }
 
             ReceivePacketCount++;
@@ -5149,6 +5360,20 @@ Return Value:
     //
     Adapter->ResetInProgress = TRUE;
     Adapter->ResetInitStarted = FALSE;
+    Adapter->TransmitResourcesReported = FALSE;
+
+    #if DBG
+    DbgPrint("pcntn5m: [%I64u] reset started (reason=%u); receive=%lu "
+             "transmit=%lu "
+             "missed=%lu no_buffer=%lu available_tx=%lu\n",
+             LanceGetDebugTimestamp(),
+             (UINT)NdisRequestType,
+             Adapter->Receive,
+             Adapter->Transmit,
+             Adapter->MissedPacket,
+             Adapter->OutOfReceiveBuffers,
+             (UINT)Adapter->NumberOfAvailableRings);
+    #endif
 
     //
     // Record what has to be completed once the chip is reinitialized.
