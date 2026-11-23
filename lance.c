@@ -2381,11 +2381,11 @@ Return Value:
             {
                 //
                 // Yield after one receive batch.  The interrupt was
-                // already acknowledged, so the timer will queue receive
-                // work again for the next DPC pass.
+                // already acknowledged, so queue the next pass immediately
+                // rather than waiting for a timer tick with packets pending.
                 //
                 Csr &= ~LANCE_CSR0_RECEIVER_INTERRUPT;
-                NdisMSetTimer(&Adapter->DeferredTimer, 1);
+                NdisMSetTimer(&Adapter->DeferredTimer, 0);
                 DeferReceiveProcessing = TRUE;
             }
         }
@@ -2461,8 +2461,7 @@ LoopBottom:;
             // A receive interrupt that came in while we finished the sends
             // was taken out of PendingInterruptStatus by the read at the
             // top of the loop.  Put it back so the DPC the ISR queued for
-            // it handles the new frames, instead of leaving them until the
-            // timer fires a clock tick later.
+            // it handles the new frames even if it runs before the timer.
             //
             if (Csr & LANCE_CSR0_RECEIVER_INTERRUPT)
             {

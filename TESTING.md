@@ -112,6 +112,14 @@ alone does not confirm that initialization completed.
 
 If a test fails, keep the debug output and note the test number. A `!analyze -v` (WinDbg) or `bt` (KDBG) from any bugcheck is the most useful thing to send back.
 
+For receive throughput, compare the old and new drivers with the same guest,
+adapter type and large download source. Record network throughput over time,
+packet loss and CPU use during test 7; repeat on both adapter types. Check
+that the new driver avoids sustained stalls or loss bursts and still allows
+ping and transmit traffic to progress. If a compatible Steam installation is
+available, repeat with a game download and record network and disk activity
+separately, since Steam's installation work can also pause network traffic.
+
 For the DMA window change, run test 11 (cold boot) at least 5 times on Windows 7 x64 with 2 GB or more of guest RAM. That's the case that failed with Code 10. With a kernel debugger, check these:
 
 - The init block, rings, receive buffers and transmit buffers are all in one allocation of 216,088 bytes (about 211 KiB). `AmountOfHardwareMemory` in the adapter structure should read 0x34C18.
