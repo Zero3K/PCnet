@@ -552,6 +552,10 @@ typedef struct _LANCE_ADAPTER {
     // Can only be accessed when the adapter lock is held.
     //
     UINT OutOfReceiveBuffers;
+#if DBG
+    UINT ReceiveBatchLimitCount;
+    UINT DeferredReceiveTimerCount;
+#endif
     UINT CRCError;
     UINT FramingError;
     UINT LengthError;       // frames dropped for an impossible length

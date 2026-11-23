@@ -74,6 +74,32 @@ Useful commands once connected:
 - `lm m pcntn5m`: confirms the module is loaded and shows its base address.
 - `bp pcntn5m!LanceIsr` / `bp pcntn5m!LanceHandleInterrupt`: if no traffic flows, these show whether interrupts arrive at all. Clear them afterwards; they fire on every packet.
 
+For slowdown diagnosis, build `pcntn5m.sys` with `DBG=1` or use a
+kernel-debug build. Receive-batch, deferred-timer, missed-packet, and
+receive-buffer diagnostics are sampled every 256 events (plus the first
+event), so debug output does not print every batch or lost packet:
+
+- `receive batch sample` / `deferred timer`: receive processing yielded or
+  resumed; the counters in each line show whether misses track batch pressure.
+- `missed packet sample`, `receive buffer error sample`, `receive overflow
+  sample`: receive descriptor or missed-frame pressure increased.
+  `MissedPacket` counts CSR0 missed-packet interrupt indications; it is not
+  an exact count of dropped frames.
+- `transmit ring exhausted` / `transmit resources recovered`: send resources
+  reached zero and later became available.
+- `transmitter stopped`, `memory error`, `reset started`, and
+  `reset/INIT complete`: hardware or reset state changed.
+- `media state`: link status changed.
+
+The driver queues a zero-delay timer continuation after each bounded
+half-ring receive batch instead of waiting one millisecond before resuming.
+Start the download, break into WinDbg only when a slowdown is visible, then
+use the adapter address to compare `Receive`, `Transmit`, `MissedPacket`,
+`OutOfReceiveBuffers`, `MemoryError`, `UnderFlow`, `NumberOfAvailableRings`,
+and `ResetInProgress`. Let the VM run freely between one-second WinDbg
+break-ins; frequent breakpoints or per-packet printing can themselves alter
+the throughput pattern.
+
 Symbols: `objfre_wnet_x86\i386\pcntn5m.pdb`. Use `.sympath+ C:\tasks\PCnet\objfre_wnet_x86\i386` and then `.reload /f pcntn5m.sys`.
 
 ### ReactOS with its built-in KDBG (the default for release and nightly builds)
