@@ -91,8 +91,10 @@ event), so debug output does not print every batch or lost packet:
   `reset/INIT complete`: hardware or reset state changed.
 - `media state`: link status changed.
 
-The driver queues a zero-delay timer continuation after each bounded
-half-ring receive batch instead of waiting one millisecond before resuming.
+The driver drains the complete 64-entry receive ring in one bounded pass and
+queues a zero-delay timer continuation if more work remains. This avoids
+turning the continuation timer into a normal half-ring receive-processing
+step under sustained traffic.
 Each periodic `pcntn5m: periodic delta` line is one CheckForHang interval
 (normally about two seconds) and reports counter changes since the previous
 line. Compare these deltas during fast and slow periods:

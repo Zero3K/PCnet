@@ -4327,7 +4327,13 @@ Return Value:
     // need to get it from the adapter all the time.
     //
     const UINT TopReceiveIndex = Adapter->NumberOfReceiveRings - 1;
-    const UINT ReceivePacketLimit = Adapter->NumberOfReceiveRings / 2;
+    //
+    // Drain the complete receive ring in one bounded pass.  Limiting this
+    // to half the ring made the continuation timer part of the normal
+    // receive path and allowed the PCnet missed-packet bit to accumulate
+    // under sustained traffic.
+    //
+    const UINT ReceivePacketLimit = Adapter->NumberOfReceiveRings;
 
     //
     // Boolean to record the fact that we've finished processing
@@ -4370,8 +4376,9 @@ Return Value:
         else if (ReceivePacketCount >= ReceivePacketLimit)
         {
             //
-            // Amortize interrupt synchronization over a larger receive
-            // batch while keeping each pass bounded by half the ring.
+            // The complete ring has been processed.  Keep the continuation
+            // path for the case where the hardware refilled descriptors
+            // while this pass was running.
             //
             LOG(RECEIVE)
 
