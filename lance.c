@@ -903,63 +903,6 @@ Routine Description:
     USHORT Bcr4;
     BOOLEAN LinkUp;
 
-#if DBG
-    //
-    // NDIS calls this periodically (normally about every two seconds).
-    // Snapshot deltas make it possible to compare the driver activity
-    // during fast and slow download intervals without logging packets.
-    //
-    if (!Adapter->DebugCountersInitialized)
-    {
-        Adapter->DebugCountersInitialized = TRUE;
-        Adapter->DebugLastReceive = Adapter->Receive;
-        Adapter->DebugLastTransmit = Adapter->Transmit;
-        Adapter->DebugLastMissedPacket = Adapter->MissedPacket;
-        Adapter->DebugLastOutOfReceiveBuffers = Adapter->OutOfReceiveBuffers;
-        Adapter->DebugLastCRCError = Adapter->CRCError;
-        Adapter->DebugLastFramingError = Adapter->FramingError;
-        Adapter->DebugLastLengthError = Adapter->LengthError;
-        Adapter->DebugLastRetryFailure = Adapter->RetryFailure;
-        Adapter->DebugLastUnderFlow = Adapter->UnderFlow;
-
-        DbgPrint("pcntn5m: periodic baseline; receive=%lu transmit=%lu "
-                 "available_tx=%lu reset=%u\n",
-                 Adapter->Receive,
-                 Adapter->Transmit,
-                 (UINT)Adapter->NumberOfAvailableRings,
-                 (UINT)Adapter->ResetInProgress);
-    }
-    else
-    {
-        DbgPrint("pcntn5m: periodic delta; receive=+%lu transmit=+%lu "
-                 "missed=+%lu no_buffer=+%lu crc=+%lu framing=+%lu "
-                 "length=+%lu retry=+%lu underflow=+%lu available_tx=%lu "
-                 "reset=%u\n",
-                 Adapter->Receive - Adapter->DebugLastReceive,
-                 Adapter->Transmit - Adapter->DebugLastTransmit,
-                 Adapter->MissedPacket - Adapter->DebugLastMissedPacket,
-                 Adapter->OutOfReceiveBuffers -
-                     Adapter->DebugLastOutOfReceiveBuffers,
-                 Adapter->CRCError - Adapter->DebugLastCRCError,
-                 Adapter->FramingError - Adapter->DebugLastFramingError,
-                 Adapter->LengthError - Adapter->DebugLastLengthError,
-                 Adapter->RetryFailure - Adapter->DebugLastRetryFailure,
-                 Adapter->UnderFlow - Adapter->DebugLastUnderFlow,
-                 (UINT)Adapter->NumberOfAvailableRings,
-                 (UINT)Adapter->ResetInProgress);
-
-        Adapter->DebugLastReceive = Adapter->Receive;
-        Adapter->DebugLastTransmit = Adapter->Transmit;
-        Adapter->DebugLastMissedPacket = Adapter->MissedPacket;
-        Adapter->DebugLastOutOfReceiveBuffers = Adapter->OutOfReceiveBuffers;
-        Adapter->DebugLastCRCError = Adapter->CRCError;
-        Adapter->DebugLastFramingError = Adapter->FramingError;
-        Adapter->DebugLastLengthError = Adapter->LengthError;
-        Adapter->DebugLastRetryFailure = Adapter->RetryFailure;
-        Adapter->DebugLastUnderFlow = Adapter->UnderFlow;
-    }
-#endif
-
     //
     // A reset is running.  Sends get RESOURCES until it finishes, so
     // no send arms the timer, and if its IDON interrupt went missing
@@ -1018,12 +961,6 @@ Routine Description:
 
     if (LinkUp != Adapter->MediaConnected)
     {
-        #if DBG
-        DbgPrint("pcntn5m: media state %s (BCR4=0x%04x)\n",
-                 LinkUp ? "connected" : "disconnected",
-                 Bcr4);
-        #endif
-
         Adapter->MediaConnected = LinkUp;
 
         NdisMIndicateStatus(
@@ -1602,20 +1539,6 @@ Return Value:
 
         Adapter->CurrentReceiveIndex = 0;
         Adapter->OutOfReceiveBuffers = 0;
-#if DBG
-        Adapter->ReceiveBatchLimitCount = 0;
-        Adapter->DeferredReceiveTimerCount = 0;
-        Adapter->DebugLastReceive = 0;
-        Adapter->DebugLastTransmit = 0;
-        Adapter->DebugLastMissedPacket = 0;
-        Adapter->DebugLastOutOfReceiveBuffers = 0;
-        Adapter->DebugLastCRCError = 0;
-        Adapter->DebugLastFramingError = 0;
-        Adapter->DebugLastLengthError = 0;
-        Adapter->DebugLastRetryFailure = 0;
-        Adapter->DebugLastUnderFlow = 0;
-        Adapter->DebugCountersInitialized = FALSE;
-#endif
         Adapter->CRCError = 0;
         Adapter->FramingError = 0;
         Adapter->RetryFailure = 0;
@@ -1627,7 +1550,6 @@ Return Value:
         Adapter->MoreThanOneRetry = 0;
         Adapter->ResetInProgress = FALSE;
         Adapter->ResetInitStarted = FALSE;
-        Adapter->TransmitResourcesReported = FALSE;
         Adapter->FirstInitialization = TRUE;
         Adapter->HardwareFailure = FALSE;
 
@@ -2191,25 +2113,6 @@ Return Value:
         return;
     }
 
-    #if DBG
-    Adapter->DeferredReceiveTimerCount++;
-
-    if (Adapter->ResetInProgress ||
-        ((Adapter->DeferredReceiveTimerCount & 0xff) == 1))
-    {
-        DbgPrint("pcntn5m: deferred timer; count=%lu receive=%lu "
-                 "batches=%lu missed=%lu no_buffer=%lu available_tx=%lu "
-                 "reset=%u\n",
-                 Adapter->DeferredReceiveTimerCount,
-                 Adapter->Receive,
-                 Adapter->ReceiveBatchLimitCount,
-                 Adapter->MissedPacket,
-                 Adapter->OutOfReceiveBuffers,
-                 (UINT)Adapter->NumberOfAvailableRings,
-                 (UINT)Adapter->ResetInProgress);
-    }
-    #endif
-
     NdisMSynchronizeWithInterrupt(
         &Adapter->Interrupt,
         LanceSyncQueueReceiveInterrupt,
@@ -2327,19 +2230,6 @@ Return Value:
             Adapter->ResetInProgress = FALSE;
             Adapter->ResetInitStarted = FALSE;
 
-            #if DBG
-            DbgPrint("pcntn5m: reset/INIT complete; receive=%lu transmit=%lu "
-                     "missed=%lu no_buffer=%lu memory=%lu underflow=%lu "
-                     "available_tx=%lu\n",
-                     Adapter->Receive,
-                     Adapter->Transmit,
-                     Adapter->MissedPacket,
-                     Adapter->OutOfReceiveBuffers,
-                     Adapter->MemoryError,
-                     Adapter->UnderFlow,
-                     (UINT)Adapter->NumberOfAvailableRings);
-            #endif
-
             if (Adapter->ReinitAfterReset)
             {
                 Adapter->ReinitAfterReset = FALSE;
@@ -2437,19 +2327,6 @@ Return Value:
             if (Csr & LANCE_CSR0_MISSED_PACKET)
             {
                 Adapter->MissedPacket++;
-                #if DBG
-                if ((Adapter->MissedPacket & 0xff) == 1)
-                {
-                    DbgPrint("pcntn5m: missed packet sample; total=%lu "
-                             "receive=%lu no_buffer=%lu batches=%lu "
-                             "available_tx=%lu\n",
-                             Adapter->MissedPacket,
-                             Adapter->Receive,
-                             Adapter->OutOfReceiveBuffers,
-                             Adapter->ReceiveBatchLimitCount,
-                             (UINT)Adapter->NumberOfAvailableRings);
-                }
-                #endif
             }
             if (Csr & LANCE_CSR0_BABBLE)
             {
@@ -2475,14 +2352,6 @@ Return Value:
                 // transmitter.  Reset to get the device started again.
                 //
                 Adapter->MemoryError++;
-                #if DBG
-                DbgPrint("pcntn5m: memory error; total=%lu receive=%lu "
-                         "transmit=%lu reset=%u\n",
-                         Adapter->MemoryError,
-                         Adapter->Receive,
-                         Adapter->Transmit,
-                         (UINT)Adapter->ResetInProgress);
-                #endif
 
                 SetupForReset(
                     Adapter,
@@ -2552,14 +2421,6 @@ Return Value:
                     // before its descriptor is processed, so count it here.
                     //
                     Adapter->UnderFlow++;
-                    #if DBG
-                    DbgPrint("pcntn5m: transmitter stopped; underflow=%lu "
-                             "receive=%lu transmit=%lu available_tx=%lu\n",
-                             Adapter->UnderFlow,
-                             Adapter->Receive,
-                             Adapter->Transmit,
-                             (UINT)Adapter->NumberOfAvailableRings);
-                    #endif
 
                     SetupForReset(
                         Adapter,
@@ -4382,24 +4243,6 @@ Return Value:
             //
             LOG(RECEIVE)
 
-            #if DBG
-            Adapter->ReceiveBatchLimitCount++;
-
-            if ((Adapter->ReceiveBatchLimitCount & 0xff) == 1)
-            {
-                DbgPrint("pcntn5m: receive batch sample; count=%lu "
-                         "packets=%lu receive=%lu missed=%lu no_buffer=%lu "
-                         "available_tx=%lu reset=%u\n",
-                         Adapter->ReceiveBatchLimitCount,
-                         ReceivePacketCount,
-                         Adapter->Receive,
-                         Adapter->MissedPacket,
-                         Adapter->OutOfReceiveBuffers,
-                         (UINT)Adapter->NumberOfAvailableRings,
-                         (UINT)Adapter->ResetInProgress);
-            }
-            #endif
-
             return(FALSE);
         }
         else if (ReceiveSummaryBits & LANCE_RECEIVE_ERROR_SUMMARY)
@@ -4419,15 +4262,6 @@ Return Value:
                 //
 
                 Adapter->OutOfReceiveBuffers++;
-                #if DBG
-                if ((Adapter->OutOfReceiveBuffers & 0xff) == 1)
-                {
-                    DbgPrint("pcntn5m: receive buffer error sample; "
-                             "no_buffer=%lu receive=%lu\n",
-                             Adapter->OutOfReceiveBuffers,
-                             Adapter->Receive);
-                }
-                #endif
             }
             else if (ReceiveSummaryBits & LANCE_RECEIVE_FRAMING_ERROR)
             {
@@ -4444,15 +4278,6 @@ Return Value:
             else if (ReceiveSummaryBits & LANCE_RECEIVE_OVERFLOW_ERROR)
             {
                 Adapter->OutOfReceiveBuffers++;
-                #if DBG
-                if ((Adapter->OutOfReceiveBuffers & 0xff) == 1)
-                {
-                    DbgPrint("pcntn5m: receive overflow sample; "
-                             "no_buffer=%lu receive=%lu\n",
-                             Adapter->OutOfReceiveBuffers,
-                             Adapter->Receive);
-                }
-                #endif
             }
 
             ReceivePacketCount++;
@@ -5330,18 +5155,6 @@ Return Value:
     //
     Adapter->ResetInProgress = TRUE;
     Adapter->ResetInitStarted = FALSE;
-    Adapter->TransmitResourcesReported = FALSE;
-
-    #if DBG
-    DbgPrint("pcntn5m: reset started (reason=%u); receive=%lu transmit=%lu "
-             "missed=%lu no_buffer=%lu available_tx=%lu\n",
-             (UINT)NdisRequestType,
-             Adapter->Receive,
-             Adapter->Transmit,
-             Adapter->MissedPacket,
-             Adapter->OutOfReceiveBuffers,
-             (UINT)Adapter->NumberOfAvailableRings);
-    #endif
 
     //
     // Record what has to be completed once the chip is reinitialized.
