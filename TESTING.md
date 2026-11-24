@@ -2,7 +2,7 @@
 
 How to test the driver in a ReactOS x86 VM under VirtualBox. Then repeat the same steps on the other supported targets: Windows Server 2003 x86, Windows XP x86, Windows 7 x86 and Windows 7 x64 (see section 7). Only the install dialogs, the driver signing and the debugger boot switch differ.
 
-Windows 8, Windows 10 and Windows 11 are not supported; CHANGES.md explains why.
+Windows 8, Windows 10 and Windows 11 also load the driver, but this checklist has not been run on them yet. See CHANGES.md (Untested).
 
 Test both emulated chips, one after the other:
 

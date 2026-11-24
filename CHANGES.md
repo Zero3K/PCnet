@@ -104,11 +104,11 @@ Each entry gives what was wrong, what changed, and how to verify it. The test nu
 - **Everything except build.** These changes are only reviewed and built. TESTING.md is the plan. The cold-boot changes (#60) and the audit follow-ups have not been run yet.
 - **Am79C970, 79C971 (PCnet-FAST), 79C972 (PCnet-FAST+), 79C975 and 79C978 (PCnet-Home).** VirtualBox emulates only the 79C970A and 79C973, so these need real cards. The 79C971/972/975 should behave like the 79C973 in 16-bit mode. The 79C978 is matched on `1022:2001`, but its HomePNA PHY selection is not handled. The original 79C970 is identified by part 0x2420/0x2430, but the 0x2430 mapping is from memory and should be checked against a real chip.
 - **Windows Server 2003 x86, Windows XP x86, Windows 7 x86 and x64.** These are supported targets, since all of them load NDIS 5.1 miniports. TESTING.md section 7 has an XP and Windows 7 run of the same checklist.
+- **Windows 8, 10 and 11.** These also load NDIS 5.1 miniports, through NDIS's compatibility layer. Every function the x64 build imports is still exported by Windows 11 25H2's `ndis.sys`, `ntoskrnl.exe` and `hal.dll`, and the driver runs in a Windows 11 VirtualBox guest (#82). As on Windows 7 x64, the x64 build has to be test-signed (`bcdedit /set testsigning on`, which needs Secure Boot off). Microsoft has deprecated NDIS 5.x, so a future Windows release could drop it. The TESTING.md checklist has not been run on these versions.
 - **SMP.** The ISR/RAP synchronization is written for SMP but has only been reviewed.
 
 ## Out of scope
 
-- **Windows 8, 10 and 11.** These versions no longer load NDIS 5.x miniports. Supporting them means a separate driver: an NDIS 6 miniport, built for x64, and attestation-signed through Microsoft's Hardware Dev Center. That would be a new driver, not a fix to this one.
 - **ReactOS upstreaming.** A ReactOS PR is most likely blocked by the license. This code comes from the NT 4.0 DDK sample, and ReactOS needs GPL-compatible code. ReactOS's FastFAT came from Microsoft's MS-PL GitHub samples, which have a different license from this code. ReactOS also already has its own `pcnet` driver.
 
 ## Performance

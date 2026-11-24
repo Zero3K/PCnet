@@ -7,7 +7,7 @@
 ; The INF declares x86 and amd64 models. Package it with the binary for
 ; the target: the fre x86 build for x86, the fre x64 build for amd64.
 ; x64 Windows also requires the driver to be signed.
-; Not for Windows 8, 10 or 11: those no longer load NDIS 5.x miniports.
+; Windows 8, 10 and 11 still load NDIS 5.x miniports, but are untested.
 ; All PCnet-PCI/FAST parts share PCI ID 1022:2000; the driver identifies
 ; the individual chip at runtime from CSR88/CSR89.
 ; VirtualBox differentiates the 79C970A and 79C973 with PCI revisions 0x16 and 0x40.
